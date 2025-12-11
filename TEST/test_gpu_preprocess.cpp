@@ -8,6 +8,7 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/cudawarping.hpp>
 #include "../trt_function/src/gpu_preprocess.h"
+#include "../trt_function/src/gpu_kernels.cuh"
 
 using namespace Function;
 
@@ -109,20 +110,25 @@ int main() {
     std::cout << "Original [0,0]: " << test_img.at<cv::Vec3b>(0,0) << std::endl;
     std::cout << "Uploaded [0,0]: " << uploaded_back.at<cv::Vec3b>(0,0) << std::endl;
     
-    // 验证1: resize结果对比 - 重新上传一份干净的数据
+    // 验证1: resize结果对比 - 使用自定义gpuResize
     cv::cuda::GpuMat gpu_img_fresh;
     gpu_img_fresh.upload(test_img);
     
     cv::Mat cpu_resized;
     cv::resize(test_img, cpu_resized, cv::Size(target_size, target_size));
     
-    cv::cuda::GpuMat gpu_resized;
-    cv::cuda::resize(gpu_img_fresh, gpu_resized, cv::Size(target_size, target_size));
+    // 使用自定义的gpuResize（和GPUPreprocess内部一致）
+    cv::cuda::GpuMat gpu_resized(target_size, target_size, CV_8UC3);
+    Function::gpuResize(gpu_img_fresh.ptr<unsigned char>(), gpu_resized.ptr<unsigned char>(),
+                        gpu_img_fresh.cols, gpu_img_fresh.rows, target_size, target_size,
+                        3, gpu_img_fresh.step, gpu_resized.step, nullptr);
+    cudaDeviceSynchronize();
+    
     cv::Mat gpu_resized_cpu;
     gpu_resized.download(gpu_resized_cpu);
     
     double resize_diff = cv::norm(cpu_resized, gpu_resized_cpu, cv::NORM_INF);
-    std::cout << "Resize max diff: " << resize_diff << std::endl;
+    std::cout << "Custom gpuResize max diff: " << resize_diff << std::endl;
     
     // 打印resize后的前几个像素
     std::cout << "CPU resized [0,0]: " << cpu_resized.at<cv::Vec3b>(0,0) << std::endl;
