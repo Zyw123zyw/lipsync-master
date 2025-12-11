@@ -53,6 +53,7 @@ int main(int argc, char** argv)
     // 加载模型
     std::cout << "\nLoading PIPNet model..." << std::endl;
     PIPNet pipnet(model_path);
+    pipnet.initialize_handler();  // 必须先初始化TensorRT
     pipnet.warmup();
     std::cout << "Model loaded." << std::endl;
     
