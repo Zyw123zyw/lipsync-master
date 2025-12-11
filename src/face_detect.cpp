@@ -76,17 +76,16 @@ void TalkingFace::detectLandmarkGPU(int work_idx,
             detect_box.x1 += roi_rect.x;
             detect_box.y1 += roi_rect.y;
 
-            // 3. PIPNet关键点检测（暂时还是CPU，只下载小的人脸区域）
+            // 3. PIPNet关键点检测（GPU版本，无需下载）
             cv::Rect2i lmsdet_rect;
             m_face_detectors[work_idx]->expand_box_for_pipnet(
                 cv::Size(gpu_frame.cols, gpu_frame.rows), detect_box, lmsdet_rect, 1.2);
             
-            // 只下载人脸区域到CPU
-            cv::Mat kp_img;
-            gpu_frame(lmsdet_rect).download(kp_img);
+            // GPU上裁剪人脸区域，直接调用predictGPU
+            cv::cuda::GpuMat gpu_face = gpu_frame(lmsdet_rect);
             
             std::vector<cv::Point2i> landmark;
-            m_face_landmarkers[work_idx]->predict(kp_img, lmsdet_rect, landmark);
+            m_face_landmarkers[work_idx]->predictGPU(gpu_face, lmsdet_rect, landmark);
 
             // 4. 侧脸检测
             if (video_params.filter_head_pose == true)
