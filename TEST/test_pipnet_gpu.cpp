@@ -57,26 +57,43 @@ int main(int argc, char** argv)
     pipnet.warmup();
     std::cout << "Model loaded." << std::endl;
     
-    // CPU预测
-    std::cout << "\n--- CPU Predict ---" << std::endl;
+    // Warmup runs
+    std::cout << "\n--- Warmup (5 runs each) ---" << std::endl;
+    for (int i = 0; i < 5; i++) {
+        std::vector<cv::Point2i> tmp;
+        pipnet.predict(face_img, face_rect, tmp);
+        tmp.clear();
+        pipnet.predictGPU(gpu_face, face_rect, tmp);
+    }
+    std::cout << "Warmup done." << std::endl;
+    
+    // CPU预测（多次取平均）
+    std::cout << "\n--- CPU Predict (10 runs) ---" << std::endl;
     std::vector<cv::Point2i> landmarks_cpu;
+    const int num_runs = 10;
     
     double t0 = (double)cv::getTickCount();
-    pipnet.predict(face_img, face_rect, landmarks_cpu);
-    double cpu_time = ((double)cv::getTickCount() - t0) / cv::getTickFrequency() * 1000;
+    for (int i = 0; i < num_runs; i++) {
+        landmarks_cpu.clear();
+        pipnet.predict(face_img, face_rect, landmarks_cpu);
+    }
+    double cpu_time = ((double)cv::getTickCount() - t0) / cv::getTickFrequency() * 1000 / num_runs;
     
-    std::cout << "CPU time: " << cpu_time << " ms" << std::endl;
+    std::cout << "CPU avg time: " << cpu_time << " ms" << std::endl;
     std::cout << "Landmarks count: " << landmarks_cpu.size() << std::endl;
     
-    // GPU预测
-    std::cout << "\n--- GPU Predict ---" << std::endl;
+    // GPU预测（多次取平均）
+    std::cout << "\n--- GPU Predict (10 runs) ---" << std::endl;
     std::vector<cv::Point2i> landmarks_gpu;
     
     t0 = (double)cv::getTickCount();
-    pipnet.predictGPU(gpu_face, face_rect, landmarks_gpu);
-    double gpu_time = ((double)cv::getTickCount() - t0) / cv::getTickFrequency() * 1000;
+    for (int i = 0; i < num_runs; i++) {
+        landmarks_gpu.clear();
+        pipnet.predictGPU(gpu_face, face_rect, landmarks_gpu);
+    }
+    double gpu_time = ((double)cv::getTickCount() - t0) / cv::getTickFrequency() * 1000 / num_runs;
     
-    std::cout << "GPU time: " << gpu_time << " ms" << std::endl;
+    std::cout << "GPU avg time: " << gpu_time << " ms" << std::endl;
     std::cout << "Landmarks count: " << landmarks_gpu.size() << std::endl;
     
     // 对比结果
