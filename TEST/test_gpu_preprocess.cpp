@@ -11,30 +11,32 @@
 
 using namespace Function;
 
-// CPU版本预处理（对照）
+// CPU版本预处理（对照，和原模型一致）
 std::vector<float> cpuPreprocess(const cv::Mat& mat, int target_size, 
                                   const float* mean, const float* norm) {
     cv::Mat canva = mat.clone();
     cv::resize(canva, canva, cv::Size(target_size, target_size));
     
-    // normalize
+    // normalize (和原模型的normalize_inplace一致)
     canva.convertTo(canva, CV_32FC3);
+    for (int i = 0; i < canva.rows; i++) {
+        cv::Vec3f* p = canva.ptr<cv::Vec3f>(i);
+        for (int j = 0; j < canva.cols; j++) {
+            p[j][0] = (p[j][0] - mean[0]) * norm[0];  // B
+            p[j][1] = (p[j][1] - mean[1]) * norm[1];  // G
+            p[j][2] = (p[j][2] - mean[2]) * norm[2];  // R
+        }
+    }
+    
+    // HWC -> CHW (和原模型的trans2chw一致)
     std::vector<cv::Mat> channels(3);
     cv::split(canva, channels);
     
-    for (int i = 0; i < 3; i++) {
-        channels[i] = (channels[i] - mean[i]) * norm[i];
-    }
-    
-    // HWC -> CHW
     std::vector<float> result(target_size * target_size * 3);
     for (int c = 0; c < 3; c++) {
-        for (int h = 0; h < target_size; h++) {
-            for (int w = 0; w < target_size; w++) {
-                result[c * target_size * target_size + h * target_size + w] = 
-                    channels[c].at<float>(h, w);
-            }
-        }
+        memcpy(result.data() + c * target_size * target_size,
+               channels[c].data,
+               target_size * target_size * sizeof(float));
     }
     
     return result;
@@ -47,10 +49,11 @@ int main() {
     cv::Mat test_img(480, 640, CV_8UC3);
     cv::randu(test_img, cv::Scalar(0, 0, 0), cv::Scalar(255, 255, 255));
     
-    // 预处理参数（模拟PIPNet的参数）
+    // 预处理参数（使用简单参数便于调试）
+    // 使用GCFSR的参数：mean=128, norm=1/128
     int target_size = 256;
-    float mean[3] = {0.485f * 255.f, 0.456f * 255.f, 0.406f * 255.f};
-    float norm[3] = {1.0f / (0.229f * 255.f), 1.0f / (0.224f * 255.f), 1.0f / (0.225f * 255.f)};
+    float mean[3] = {128.f, 128.f, 128.f};
+    float norm[3] = {1.f/128.f, 1.f/128.f, 1.f/128.f};
     
     std::cout << "Input size: " << test_img.cols << "x" << test_img.rows << std::endl;
     std::cout << "Target size: " << target_size << std::endl;
@@ -80,8 +83,13 @@ int main() {
     // GPU预处理
     GPUPreprocess preprocessor;
     
+    // Warmup（第一次调用有初始化开销）
+    preprocessor.process(gpu_img, gpu_output, target_size, mean, norm);
+    cudaDeviceSynchronize();
+    
     t0 = (double)cv::getTickCount();
     preprocessor.process(gpu_img, gpu_output, target_size, mean, norm);
+    cudaDeviceSynchronize();
     t1 = (double)cv::getTickCount();
     double gpu_time = (t1 - t0) / cv::getTickFrequency() * 1000;
     std::cout << "GPU time: " << gpu_time << " ms" << std::endl;
