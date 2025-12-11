@@ -137,6 +137,18 @@ private:
                         cv::Rect2i &face_bbox,
                         std::vector<cv::Point2i> &face_landmark);
 
+    /**
+     * GPU版本的人脸检测+关键点检测
+     * 
+     * SCRFD检测在GPU上完成，消除H2D传输
+     * PIPNet关键点检测暂时还是CPU（只下载小的人脸区域）
+     */
+    void detectLandmarkGPU(int work_idx,
+                           const cv::cuda::GpuMat &gpu_frame,
+                           const cv::Rect2i &roi_rect,
+                           cv::Rect2i &face_bbox,
+                           std::vector<cv::Point2i> &face_landmark);
+
     void getVideoLandmark(int work_idx);
 
     Status extractAudioFeat(const char *audio_path);

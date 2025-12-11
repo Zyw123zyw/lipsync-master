@@ -151,6 +151,18 @@ target_link_libraries(testScrfdGpu
     -lpthread -lm
 )
 
+# detectLandmarkGPU测试
+add_executable(testDetectLandmarkGpu 
+    TEST/test_detect_landmark_gpu.cpp
+)
+target_link_libraries(testDetectLandmarkGpu
+    ${OpenCV_LIBS}
+    ${TRT_FUNCTION}
+    nvinfer
+    cudart
+    -lpthread -lm
+)
+
 # add_executable(testDet unitTest/test_facedet.cpp)
 # target_link_libraries(testDet
 #     ${OpenCV_LIBS}
