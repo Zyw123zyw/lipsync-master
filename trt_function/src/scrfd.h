@@ -2,8 +2,11 @@
 #define SCRFD_H
 
 #include <fstream>
+#include <opencv2/cudawarping.hpp>
 #include "../core/trt_handler.h"
 #include "../core/trt_utils.h"
+#include "gpu_kernels.cuh"
+#include "gpu_preprocess.h"
 
 namespace Function
 {
@@ -107,9 +110,27 @@ private:
 
 
 public:
+    /**
+     * CPU版本的人脸检测（原有接口，保持不变）
+     */
     void detect(const cv::Mat &mat, std::vector<DetectionBox> &objects,
                 float score_threshold = 0.5f, float iou_threshold = 0.45f,
                 unsigned int topk = 1);
+
+    /**
+     * GPU版本的人脸检测
+     * 
+     * 输入为GPU上的图像，预处理在GPU上完成，消除H2D传输
+     * 
+     * @param gpu_mat       GPU上的输入图像 (BGR, CV_8UC3)
+     * @param objects       输出检测结果
+     * @param score_threshold 置信度阈值
+     * @param iou_threshold   NMS的IOU阈值
+     * @param topk            最多返回的人脸数
+     */
+    void detectGPU(const cv::cuda::GpuMat &gpu_mat, std::vector<DetectionBox> &objects,
+                   float score_threshold = 0.5f, float iou_threshold = 0.45f,
+                   unsigned int topk = 1);
 
     void expand_box(
         const cv::Size s, const DetectionBox &box,
@@ -126,6 +147,12 @@ public:
     void paintRect(cv::Mat &img, const std::vector<cv::Rect_<int>> out_rect);
 
     void warmup();
+
+private:
+    // GPU预处理相关成员
+    GPUPreprocess gpu_preprocessor_;           // GPU预处理器
+    cv::cuda::GpuMat gpu_resized_;             // GPU上的resize结果缓存
+    GPUScaleParams gpu_scale_params_;          // GPU版本的缩放参数
 
   };
 

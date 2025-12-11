@@ -51,9 +51,14 @@ link_directories(${TENSORRT_DIR}/lib/)
 # ------------------------------------------------------
 set(TRT_FUNCTION trt_function)
 
+# 启用CUDA语言支持
+enable_language(CUDA)
+set(CMAKE_CUDA_STANDARD 14)
+
 file(GLOB TRT_SRC ${CMAKE_CURRENT_SOURCE_DIR}/trt_function/*/*.cpp)
 file(GLOB TRT_HDR ${CMAKE_CURRENT_SOURCE_DIR}/trt_function/*/*.h)
-set(COMPILE_TRT_SRC ${TRT_SRC} ${TRT_HDR})
+file(GLOB TRT_CUDA ${CMAKE_CURRENT_SOURCE_DIR}/trt_function/*/*.cu)
+set(COMPILE_TRT_SRC ${TRT_SRC} ${TRT_HDR} ${TRT_CUDA})
 
 add_library(${TRT_FUNCTION} SHARED ${COMPILE_TRT_SRC}) #构建
 
@@ -132,6 +137,18 @@ target_link_libraries(testGpuDecoder
     ${FFMPEG_LIBRARIES}
     cudart
     -lpthread
+)
+
+# SCRFD GPU测试
+add_executable(testScrfdGpu 
+    TEST/test_scrfd_gpu.cpp
+)
+target_link_libraries(testScrfdGpu
+    ${OpenCV_LIBS}
+    ${TRT_FUNCTION}
+    nvinfer
+    cudart
+    -lpthread -lm
 )
 
 # add_executable(testDet unitTest/test_facedet.cpp)

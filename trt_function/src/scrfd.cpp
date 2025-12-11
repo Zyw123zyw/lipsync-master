@@ -551,3 +551,68 @@ void SCRFD::paintRect(cv::Mat &image, const std::vector<cv::Rect_<int>> out_rect
         cv::rectangle(image, out_rect[i], col_red);
     }
 }
+
+void SCRFD::detectGPU(const cv::cuda::GpuMat &gpu_mat, std::vector<DetectionBox> &detected_boxes_kps,
+                      float score_threshold, float iou_threshold, unsigned int topk)
+{
+    if (gpu_mat.empty()) return;
+    auto img_height = static_cast<float>(gpu_mat.rows);
+    auto img_width = static_cast<float>(gpu_mat.cols);
+
+    // 1. GPU上进行resize_unscale（保持宽高比 + padding）
+    if (gpu_resized_.rows != size || gpu_resized_.cols != size) {
+        gpu_resized_.create(size, size, CV_8UC3);
+    }
+    
+    gpuResizeUnscale(gpu_mat.ptr<unsigned char>(), gpu_resized_.ptr<unsigned char>(),
+                     gpu_mat.cols, gpu_mat.rows, size, size,
+                     3, gpu_mat.step, gpu_resized_.step,
+                     gpu_scale_params_, nullptr);
+
+    // 2. GPU预处理（normalize + HWC→CHW），结果直接写入TensorRT的输入buffer
+    //    无需H2D传输！数据已经在GPU上了
+    gpu_preprocessor_.process(gpu_resized_, (float*)buffers[0], size, mean_vals, scale_vals);
+
+    // 3. TensorRT推理
+    context->executeV2(buffers);
+
+    // 4. D2H传输（保留，和CPU版本一样）
+    float *score_8 = new float[s8];
+    float *bbox_8 = new float[b8];
+    float *score_16 = new float[s16];
+    float *bbox_16 = new float[b16];
+    float *score_32 = new float[s32];
+    float *bbox_32 = new float[b32];
+
+    CHECK(cudaMemcpy(score_8, buffers[1], buffer_size[1], cudaMemcpyDeviceToHost));
+    CHECK(cudaMemcpy(bbox_8, buffers[2], buffer_size[2], cudaMemcpyDeviceToHost));
+    CHECK(cudaMemcpy(score_16, buffers[3], buffer_size[3], cudaMemcpyDeviceToHost));
+    CHECK(cudaMemcpy(bbox_16, buffers[4], buffer_size[4], cudaMemcpyDeviceToHost));
+    CHECK(cudaMemcpy(score_32, buffers[5], buffer_size[5], cudaMemcpyDeviceToHost));
+    CHECK(cudaMemcpy(bbox_32, buffers[6], buffer_size[6], cudaMemcpyDeviceToHost));
+
+    // 5. CPU后处理（保留，和CPU版本一样）
+    // 需要把GPU的scale_params转换为CPU版本的格式
+    SCRFDScaleParams scale_params;
+    scale_params.ratio = gpu_scale_params_.ratio;
+    scale_params.dw = gpu_scale_params_.dw;
+    scale_params.dh = gpu_scale_params_.dh;
+    scale_params.flag = true;
+
+    std::vector<DetectionBox> bbox_kps_collection;
+    this->generate_bboxes_kps(scale_params, bbox_kps_collection,
+                              score_8, bbox_8,
+                              score_16, bbox_16,
+                              score_32, bbox_32,
+                              score_threshold, img_height, img_width);
+
+    // 6. NMS
+    this->nms_bboxes_kps_combined(bbox_kps_collection, detected_boxes_kps, iou_threshold, topk);
+
+    delete[] score_8;
+    delete[] bbox_8;
+    delete[] score_16;
+    delete[] bbox_16;
+    delete[] score_32;
+    delete[] bbox_32;
+}
