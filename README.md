@@ -44,4 +44,4 @@ sudo docker run -it --cpus 6 --gpus 'device=0' -e NVIDIA_DRIVER_CAPABILITIES=all
    - CMakeLists.txt 打开 Unit Test 注释，然后sh build.sh得到 testRender 可执行文件，
    - 然后在 /workspace/project/talkingface/.vscode/launch.json 下指定输入，
    - 最后按F5运行即可。
-# lipsync-master
+# lipsync-master 123123123123
