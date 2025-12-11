@@ -21,27 +21,32 @@ void TalkingFace::renderProducer(int work_idx)
         // 简单循环播放（不再乒乓来回）
         diban_idx = render_idx % infos.frame_nums;
 
-        // 使用GPU解码器获取帧，然后下载到CPU
+        // 使用GPU解码器获取帧
         double t_gpu_start = (double)cv::getTickCount();
         cv::cuda::GpuMat& gpu_frame = gpu_decoder_->decodeFrame(diban_idx, work_idx);
         double t_gpu_decode = (double)cv::getTickCount();
         
-        cv::Mat frame;
-        gpu_frame.download(frame);
-        double t_download = (double)cv::getTickCount();
-        
-        // 如果需要缩放到目标分辨率
-        if (frame.cols != infos.video_width || frame.rows != infos.video_height) {
-            cv::resize(frame, frame, cv::Size(infos.video_width, infos.video_height));
+        // GPU缩放（如果需要）
+        cv::cuda::GpuMat gpu_frame_resized;
+        if (gpu_frame.cols != infos.video_width || gpu_frame.rows != infos.video_height) {
+            cv::cuda::resize(gpu_frame, gpu_frame_resized, 
+                           cv::Size(infos.video_width, infos.video_height));
+        } else {
+            gpu_frame_resized = gpu_frame;
         }
-        double t_resize = (double)cv::getTickCount();
+        double t_gpu_resize = (double)cv::getTickCount();
+        
+        // 下载到CPU（Wav2Lip等后续处理需要）
+        cv::Mat frame;
+        gpu_frame_resized.download(frame);
+        double t_download = (double)cv::getTickCount();
         double freq = cv::getTickFrequency();
         
-        DBG_LOGI("Producer[%d] render_idx=%d diban_idx=%d | gpu_decode=%.1fms download=%.1fms resize=%.1fms\n",
+        DBG_LOGI("Producer[%d] render_idx=%d diban_idx=%d | gpu_decode=%.1fms gpu_resize=%.1fms download=%.1fms\n",
                  work_idx, render_idx, diban_idx,
                  (t_gpu_decode - t_gpu_start) * 1000 / freq,
-                 (t_download - t_gpu_decode) * 1000 / freq,
-                 (t_resize - t_download) * 1000 / freq);
+                 (t_gpu_resize - t_gpu_decode) * 1000 / freq,
+                 (t_download - t_gpu_resize) * 1000 / freq);
 
         // cv::Mat frame_src = frame.clone();
 
@@ -57,11 +62,13 @@ void TalkingFace::renderProducer(int work_idx)
             // 判断该底板帧是否已检测过了
             if (infos.face_bboxes.size() == 0)
             {
-                this->detectLandmark(work_idx, frame, infos.id_rois[id], box, landmark);
+                // 使用GPU版本的人脸检测（消除H2D传输）
+                this->detectLandmarkGPU(work_idx, gpu_frame_resized, infos.id_rois[id], box, landmark);
             }
             else if (diban_idx >= infos.face_bboxes[id].size())
             {
-                this->detectLandmark(work_idx, frame, infos.id_rois[id], box, landmark);
+                // 使用GPU版本的人脸检测（消除H2D传输）
+                this->detectLandmarkGPU(work_idx, gpu_frame_resized, infos.id_rois[id], box, landmark);
             }
             else
             {
