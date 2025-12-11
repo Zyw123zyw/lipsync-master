@@ -27,3 +27,17 @@ g++ -o test_gpu_preprocess test_gpu_preprocess.cpp \
     -Wl,-rpath,${OPENCV_CUDA_DIR}/lib
 
 echo "Build done: ./test_gpu_preprocess"
+
+# GPU resize_unscale测试
+g++ -o test_resize_unscale test_resize_unscale.cpp \
+    gpu_kernels.o \
+    -I${OPENCV_CUDA_DIR}/include/opencv4 \
+    -I${CUDA_DIR}/include \
+    -L${OPENCV_CUDA_DIR}/lib \
+    -L${CUDA_DIR}/lib64 \
+    -lopencv_core -lopencv_imgproc -lopencv_cudawarping \
+    -lcudart \
+    -std=c++14 \
+    -Wl,-rpath,${OPENCV_CUDA_DIR}/lib
+
+echo "Build done: ./test_resize_unscale"

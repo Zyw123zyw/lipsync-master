@@ -176,4 +176,123 @@ void gpuResizeFloat(const float* src, float* dst,
         channels, src_step, dst_step, scale_x, scale_y);
 }
 
+//=============================================================================
+// GPU Resize Unscale - 保持宽高比resize + padding
+//=============================================================================
+
+/**
+ * CUDA kernel: resize_unscale
+ * 
+ * 对于目标图像的每个像素：
+ * - 如果在padding区域内，输出黑色(0,0,0)
+ * - 如果在有效区域内，从源图像双线性插值采样
+ */
+__global__ void resizeUnscaleKernel(
+    const unsigned char* __restrict__ src,
+    unsigned char* __restrict__ dst,
+    int src_w, int src_h,
+    int dst_w, int dst_h,
+    int channels,
+    int src_step, int dst_step,
+    int dw, int dh,           // padding偏移
+    int new_w, int new_h,     // resize后的尺寸（不含padding）
+    float scale_x, float scale_y)
+{
+    int dst_x = blockIdx.x * blockDim.x + threadIdx.x;
+    int dst_y = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    if (dst_x >= dst_w || dst_y >= dst_h) return;
+    
+    unsigned char* out = dst + dst_y * dst_step + dst_x * channels;
+    
+    // 检查是否在padding区域
+    int x_in_roi = dst_x - dw;
+    int y_in_roi = dst_y - dh;
+    
+    if (x_in_roi < 0 || x_in_roi >= new_w || y_in_roi < 0 || y_in_roi >= new_h) {
+        // padding区域，填充黑色
+        for (int c = 0; c < channels; c++) {
+            out[c] = 0;
+        }
+        return;
+    }
+    
+    // 有效区域，从源图像采样
+    // 计算源图像中的浮点坐标
+    float src_xf = (x_in_roi + 0.5f) * scale_x - 0.5f;
+    float src_yf = (y_in_roi + 0.5f) * scale_y - 0.5f;
+    
+    // 双线性插值
+    int x0 = (int)floorf(src_xf);
+    int y0 = (int)floorf(src_yf);
+    int x1 = x0 + 1;
+    int y1 = y0 + 1;
+    
+    float wx = src_xf - x0;
+    float wy = src_yf - y0;
+    
+    // 边界clamp
+    x0 = max(0, min(x0, src_w - 1));
+    x1 = max(0, min(x1, src_w - 1));
+    y0 = max(0, min(y0, src_h - 1));
+    y1 = max(0, min(y1, src_h - 1));
+    
+    const unsigned char* p00 = src + y0 * src_step + x0 * channels;
+    const unsigned char* p01 = src + y0 * src_step + x1 * channels;
+    const unsigned char* p10 = src + y1 * src_step + x0 * channels;
+    const unsigned char* p11 = src + y1 * src_step + x1 * channels;
+    
+    for (int c = 0; c < channels; c++) {
+        float v00 = p00[c];
+        float v01 = p01[c];
+        float v10 = p10[c];
+        float v11 = p11[c];
+        
+        float v0 = v00 * (1.0f - wx) + v01 * wx;
+        float v1 = v10 * (1.0f - wx) + v11 * wx;
+        float v = v0 * (1.0f - wy) + v1 * wy;
+        
+        out[c] = (unsigned char)min(255.0f, max(0.0f, v + 0.5f));
+    }
+}
+
+void gpuResizeUnscale(const unsigned char* src, unsigned char* dst,
+                      int src_w, int src_h, int dst_w, int dst_h,
+                      int channels, int src_step, int dst_step,
+                      GPUScaleParams& scale_params,
+                      cudaStream_t stream)
+{
+    // 计算缩放参数（和CPU版本一致）
+    float w_r = (float)dst_w / (float)src_w;
+    float h_r = (float)dst_h / (float)src_h;
+    float r = min(w_r, h_r);
+    
+    int new_w = (int)(src_w * r);
+    int new_h = (int)(src_h * r);
+    int pad_w = dst_w - new_w;
+    int pad_h = dst_h - new_h;
+    int dw = pad_w / 2;
+    int dh = pad_h / 2;
+    
+    // 保存缩放参数供后处理使用
+    scale_params.ratio = r;
+    scale_params.dw = dw;
+    scale_params.dh = dh;
+    scale_params.new_w = new_w;
+    scale_params.new_h = new_h;
+    
+    // 从resize后的尺寸反推源图像的采样比例
+    float scale_x = (float)src_w / new_w;
+    float scale_y = (float)src_h / new_h;
+    
+    dim3 block(16, 16);
+    dim3 grid((dst_w + block.x - 1) / block.x,
+              (dst_h + block.y - 1) / block.y);
+    
+    resizeUnscaleKernel<<<grid, block, 0, stream>>>(
+        src, dst, src_w, src_h, dst_w, dst_h,
+        channels, src_step, dst_step,
+        dw, dh, new_w, new_h, scale_x, scale_y);
+}
+
 } // namespace Function
