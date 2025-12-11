@@ -102,12 +102,23 @@ int main() {
     // ========== 分步验证 ==========
     std::cout << "\n--- Step-by-step Verification ---" << std::endl;
     
-    // 验证1: resize结果对比
+    // 验证0: 上传后的数据是否一致
+    cv::Mat uploaded_back;
+    gpu_img.download(uploaded_back);
+    double upload_diff = cv::norm(test_img, uploaded_back, cv::NORM_INF);
+    std::cout << "Upload verification diff: " << upload_diff << std::endl;
+    std::cout << "Original [0,0]: " << test_img.at<cv::Vec3b>(0,0) << std::endl;
+    std::cout << "Uploaded [0,0]: " << uploaded_back.at<cv::Vec3b>(0,0) << std::endl;
+    
+    // 验证1: resize结果对比 - 重新上传一份干净的数据
+    cv::cuda::GpuMat gpu_img_fresh;
+    gpu_img_fresh.upload(test_img);
+    
     cv::Mat cpu_resized;
     cv::resize(test_img, cpu_resized, cv::Size(target_size, target_size));
     
     cv::cuda::GpuMat gpu_resized;
-    cv::cuda::resize(gpu_img, gpu_resized, cv::Size(target_size, target_size));
+    cv::cuda::resize(gpu_img_fresh, gpu_resized, cv::Size(target_size, target_size));
     cv::Mat gpu_resized_cpu;
     gpu_resized.download(gpu_resized_cpu);
     
