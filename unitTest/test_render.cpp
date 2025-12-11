@@ -26,7 +26,7 @@ int main(int argc, char* argv[])
     // video_params = R"({
     //     "face_box":[0,0,500,500]
     // })";
-
+    int KKK=1;
     const char *id_params = "";
     // id_params = R"([
     //     {
