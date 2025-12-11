@@ -20,7 +20,7 @@ public class TalkingFace {
     public native boolean stop();
 
     static {
-        System.load("/mnt/data/vision-devel/zhangyiwei/lipsync-sdk-master/build/libtalkingface.so"); // 加载动态链接库 
+        System.load("/mnt/data/vision-devel/zhangyiwei/lipsync-sdk/build/libtalkingface.so"); // 加载动态链接库 
     }
 
     public static void main(String[] args) throws IOException {
