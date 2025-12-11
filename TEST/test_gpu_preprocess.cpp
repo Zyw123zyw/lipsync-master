@@ -45,16 +45,13 @@ std::vector<float> cpuPreprocess(const cv::Mat& mat, int target_size,
 int main() {
     std::cout << "=== GPU Preprocess Test ===" << std::endl;
     
-    // 测试1: 使用相同尺寸的输入（跳过resize），验证normalize是否一致
-    int target_size = 256;
-    
-    // 创建测试图像 - 直接用目标尺寸，跳过resize
-    cv::Mat test_img(target_size, target_size, CV_8UC3);
+    // 创建测试图像 - 使用不同尺寸来测试resize
+    cv::Mat test_img(480, 640, CV_8UC3);
     cv::RNG rng(12345);  // 固定种子
     rng.fill(test_img, cv::RNG::UNIFORM, cv::Scalar(0, 0, 0), cv::Scalar(255, 255, 255));
     
-    // 预处理参数（使用简单参数便于调试）
-    // 使用GCFSR的参数：mean=128, norm=1/128
+    // 预处理参数
+    int target_size = 256;
     float mean[3] = {128.f, 128.f, 128.f};
     float norm[3] = {1.f/128.f, 1.f/128.f, 1.f/128.f};
     

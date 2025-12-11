@@ -1,4 +1,5 @@
 #include "gpu_preprocess.h"
+#include "gpu_kernels.cuh"
 #include <cuda_runtime.h>
 #include <opencv2/core/cuda_stream_accessor.hpp>
 
@@ -25,19 +26,26 @@ void GPUPreprocess::process(const cv::cuda::GpuMat& input,
     if (input.empty()) return;
     
     // 设置CUDA流
+    cudaStream_t cuda_stream = stream;
     if (stream) {
         cv_stream_ = cv::cuda::StreamAccessor::wrapStream(stream);
+    } else {
+        cuda_stream = cv::cuda::StreamAccessor::getStream(cv_stream_);
     }
     
-    // 1. Resize到目标尺寸
-    cv::cuda::resize(input, resized_, cv::Size(target_size, target_size), 
-                     0, 0, cv::INTER_LINEAR, cv_stream_);
+    // 1. Resize到目标尺寸 - 使用自定义的GPU resize (和CPU cv::resize一致)
+    if (resized_.rows != target_size || resized_.cols != target_size) {
+        resized_.create(target_size, target_size, CV_8UC3);
+    }
+    
+    gpuResize(input.ptr<unsigned char>(), resized_.ptr<unsigned char>(),
+              input.cols, input.rows, target_size, target_size,
+              3, input.step, resized_.step, cuda_stream);
     
     // 2. 转换为float类型 (0-255 -> 0.0-255.0)
     resized_.convertTo(float_mat_, CV_32FC3, 1.0, 0, cv_stream_);
     
     // 3. 先分离通道，再对每个通道单独做normalize
-    // 这样可以避免cv::Scalar在CUDA操作中的通道顺序问题
     cv::cuda::split(float_mat_, channels_, cv_stream_);
     
     // 4. 对每个通道做 (pixel - mean) * norm
@@ -47,7 +55,6 @@ void GPUPreprocess::process(const cv::cuda::GpuMat& input,
     }
     
     // 5. 拷贝到输出buffer (CHW格式)
-    // 输出布局: [C, H, W] = [3, target_size, target_size]
     size_t channel_size = target_size * target_size * sizeof(float);
     
     // 等待前面的操作完成
