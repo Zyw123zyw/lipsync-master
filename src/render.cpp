@@ -68,8 +68,12 @@ Status TalkingFace::render(const char *src_video_path,
         return Status(Status::Code::VIDEO_READ_FAIL, "GPU decoder open failed.");
     }
     
-    // 减5帧避免访问到末尾可能的空帧
-    infos.frame_nums = gpu_decoder_->getFrameCount() - 5;
+    // 减10帧避免访问到末尾可能的空帧（视频编码器通常会在末尾添加几个空帧）
+    infos.frame_nums = gpu_decoder_->getFrameCount() - 10;
+    if (infos.frame_nums < 1) {
+        infos.frame_nums = 1;
+        DBG_LOGW("Video too short, frame_nums clamped to 1\n");
+    }
     
     double t1 = ((double)cv::getTickCount() - t0) / cv::getTickFrequency();
     DBG_LOGI("read video finish (GPU decoder) cost time: %.2fs, frames: %d.\n", t1, infos.frame_nums);

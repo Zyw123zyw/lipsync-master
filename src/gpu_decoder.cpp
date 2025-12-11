@@ -260,6 +260,14 @@ bool GPUDecoder::decodeOneFrame(int target_frame) {
         return false;
     }
     
+    // 保护：目标帧不能超过有效范围
+    if (target_frame >= frame_count_ - 5) {
+        DBG_LOGW("GPUDecoder: target_frame %d too close to end (frame_count=%d), clamping\n", 
+                 target_frame, frame_count_);
+        target_frame = frame_count_ - 6;
+        if (target_frame < 0) target_frame = 0;
+    }
+    
     // 如果需要seek
     if (target_frame < current_frame_ || target_frame > current_frame_ + 30) {
         DBG_LOGI("GPUDecoder: SEEK triggered! target=%d current=%d\n", target_frame, current_frame_);
@@ -268,12 +276,22 @@ bool GPUDecoder::decodeOneFrame(int target_frame) {
     }
     
     int frames_decoded = 0;
+    int eof_retry_count = 0;
+    const int MAX_EOF_RETRY = 2;
+    
     // 解码直到目标帧
     while (true) {
         int ret = av_read_frame(fmt_ctx_, packet_);
         if (ret < 0) {
             if (ret == AVERROR_EOF) {
+                eof_retry_count++;
+                if (eof_retry_count > MAX_EOF_RETRY) {
+                    DBG_LOGE("GPUDecoder: EOF reached %d times, giving up on frame %d\n", 
+                             eof_retry_count, target_frame);
+                    return false;
+                }
                 // 到达文件末尾，重新seek到开头
+                DBG_LOGW("GPUDecoder: EOF reached, seeking to start (retry %d)\n", eof_retry_count);
                 av_seek_frame(fmt_ctx_, video_stream_idx_, 0, AVSEEK_FLAG_BACKWARD);
                 avcodec_flush_buffers(codec_ctx_);
                 current_frame_ = -1;
