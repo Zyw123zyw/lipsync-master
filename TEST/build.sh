@@ -41,3 +41,10 @@ g++ -o test_resize_unscale test_resize_unscale.cpp \
     -Wl,-rpath,${OPENCV_CUDA_DIR}/lib
 
 echo "Build done: ./test_resize_unscale"
+
+
+# PIPNet GPU测试
+# 需要链接TensorRT和完整的trt_function库
+# 建议使用CMake编译，这里只是示例
+echo "Note: test_pipnet_gpu requires TensorRT, please build with CMake:"
+echo "  cd ../build && cmake .. && make testPipnetGpu"

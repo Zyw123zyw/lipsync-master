@@ -5,6 +5,9 @@
 #include "../core/trt_handler.h"
 #include "../core/trt_utils.h"
 #include "opencv2/imgproc/imgproc.hpp"
+#include <opencv2/cudawarping.hpp>
+#include "gpu_preprocess.h"
+#include "gpu_kernels.cuh"
 
 namespace Function
 {
@@ -17,6 +20,9 @@ namespace Function
     private:
         const float mean_vals[3] = {0.485f, 0.456f, 0.406f}; // RGB order
         const float norm_vals[3] = {1.f/0.229f/255.f, 1.f/0.224f/255.f, 1.f/0.225f/255.f};
+        // BGR order for GPU (input is BGR)
+        const float mean_vals_bgr[3] = {0.406f, 0.456f, 0.485f};
+        const float norm_vals_bgr[3] = {1.f/0.225f/255.f, 1.f/0.224f/255.f, 1.f/0.229f/255.f};
         static constexpr const unsigned int num_nb = 10;
         static constexpr const unsigned int num_lms = 68;
         static constexpr const unsigned int max_len = 22;
@@ -36,7 +42,13 @@ namespace Function
                                 float img_height, float img_width);
     public:
         void predict(const cv::Mat &mat, cv::Rect_<int> img_rect, std::vector<cv::Point2i> &landmarks);
+        void predictGPU(const cv::cuda::GpuMat& gpu_mat, cv::Rect_<int> img_rect, std::vector<cv::Point2i>& landmarks);
         void warmup();
+
+    private:
+        // GPU成员变量
+        cv::cuda::GpuMat gpu_resized_;
+        GPUPreprocess gpu_preprocessor_;
 
     private:
         const unsigned int reverse_index1[68 * 22] = {

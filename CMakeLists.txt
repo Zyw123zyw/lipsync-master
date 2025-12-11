@@ -163,6 +163,18 @@ target_link_libraries(testDetectLandmarkGpu
     -lpthread -lm
 )
 
+# PIPNet GPU测试
+add_executable(testPipnetGpu 
+    TEST/test_pipnet_gpu.cpp
+)
+target_link_libraries(testPipnetGpu
+    ${OpenCV_LIBS}
+    ${TRT_FUNCTION}
+    nvinfer
+    cudart
+    -lpthread -lm
+)
+
 # add_executable(testDet unitTest/test_facedet.cpp)
 # target_link_libraries(testDet
 #     ${OpenCV_LIBS}

@@ -83,11 +83,59 @@ void PIPNet::predict(const cv::Mat &mat, cv::Rect_<int> img_rect, std::vector<cv
 							 outputs_nb_y,
 							 img_rect, img_height, img_width);
 
-	delete outputs_cls;
-	delete outputs_x;
-	delete outputs_y;
-	delete outputs_nb_x;
-	delete outputs_nb_y;
+	delete[] outputs_cls;
+	delete[] outputs_x;
+	delete[] outputs_y;
+	delete[] outputs_nb_x;
+	delete[] outputs_nb_y;
+}
+
+void PIPNet::predictGPU(const cv::cuda::GpuMat& gpu_mat, cv::Rect_<int> img_rect, std::vector<cv::Point2i>& landmarks)
+{
+	if (gpu_mat.empty()) return;
+	
+	float img_height = static_cast<float>(gpu_mat.rows);
+	float img_width = static_cast<float>(gpu_mat.cols);
+
+	// 1. GPU resize到256x256（使用gpuResize，和CPU结果一致）
+	if (gpu_resized_.rows != size || gpu_resized_.cols != size) {
+		gpu_resized_.create(size, size, CV_8UC3);
+	}
+	gpuResize(gpu_mat.ptr<unsigned char>(), gpu_resized_.ptr<unsigned char>(),
+			  gpu_mat.cols, gpu_mat.rows, size, size,
+			  3, gpu_mat.step, gpu_resized_.step, nullptr);
+
+	// 2. GPU预处理（normalize + HWC→CHW），直接写入buffers[0]
+	//    注意：PIPNet的mean/norm是RGB顺序，输入是BGR，已转换为BGR顺序
+	gpu_preprocessor_.process(gpu_resized_, (float*)buffers[0], size, mean_vals_bgr, norm_vals_bgr);
+
+	// 3. TensorRT推理
+	context->executeV2(buffers);
+
+	// 4. D2H传输（保留）
+	float *outputs_cls = new float[1*68*8*8];
+	float *outputs_x = new float[1*68*8*8];
+	float *outputs_y = new float[1*68*8*8];
+	float *outputs_nb_x = new float[1*68*10*8*8];
+	float *outputs_nb_y = new float[1*68*10*8*8];
+
+	CHECK(cudaMemcpy(outputs_cls, buffers[1], buffer_size[1], cudaMemcpyDeviceToHost));
+	CHECK(cudaMemcpy(outputs_x, buffers[2], buffer_size[2], cudaMemcpyDeviceToHost));
+	CHECK(cudaMemcpy(outputs_y, buffers[3], buffer_size[3], cudaMemcpyDeviceToHost));
+	CHECK(cudaMemcpy(outputs_nb_x, buffers[4], buffer_size[4], cudaMemcpyDeviceToHost));
+	CHECK(cudaMemcpy(outputs_nb_y, buffers[5], buffer_size[5], cudaMemcpyDeviceToHost));
+
+	// 5. CPU后处理（保留）
+	this->generate_landmarks(landmarks,
+							 outputs_cls, outputs_x, outputs_y,
+							 outputs_nb_x, outputs_nb_y,
+							 img_rect, img_height, img_width);
+
+	delete[] outputs_cls;
+	delete[] outputs_x;
+	delete[] outputs_y;
+	delete[] outputs_nb_x;
+	delete[] outputs_nb_y;
 }
 
 void PIPNet::generate_landmarks(std::vector<cv::Point2i> &landmarks,
