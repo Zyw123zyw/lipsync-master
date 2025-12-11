@@ -1,5 +1,6 @@
 #include "gpu_preprocess.h"
 #include <cuda_runtime.h>
+#include <opencv2/core/cuda_stream_accessor.hpp>
 
 namespace Function {
 
@@ -57,9 +58,23 @@ void GPUPreprocess::process(const cv::cuda::GpuMat& input,
     
     // 按CHW顺序拷贝：B, G, R (OpenCV是BGR顺序)
     // 如果模型需要RGB，这里改成 channels_[2], channels_[1], channels_[0]
-    cudaMemcpy(output, channels_[0].ptr<float>(), channel_size, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(output + target_size * target_size, channels_[1].ptr<float>(), channel_size, cudaMemcpyDeviceToDevice);
-    cudaMemcpy(output + 2 * target_size * target_size, channels_[2].ptr<float>(), channel_size, cudaMemcpyDeviceToDevice);
+    // 使用cudaMemcpy2D处理可能的padding
+    for (int c = 0; c < 3; c++) {
+        if (channels_[c].isContinuous()) {
+            cudaMemcpy(output + c * target_size * target_size, 
+                       channels_[c].ptr<float>(), 
+                       channel_size, 
+                       cudaMemcpyDeviceToDevice);
+        } else {
+            cudaMemcpy2D(output + c * target_size * target_size,
+                         target_size * sizeof(float),
+                         channels_[c].ptr<float>(),
+                         channels_[c].step,
+                         target_size * sizeof(float),
+                         target_size,
+                         cudaMemcpyDeviceToDevice);
+        }
+    }
 }
 
 void GPUPreprocess::processWithROI(const cv::cuda::GpuMat& input,
