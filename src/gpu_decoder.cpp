@@ -276,26 +276,17 @@ bool GPUDecoder::decodeOneFrame(int target_frame) {
     }
     
     int frames_decoded = 0;
-    int eof_retry_count = 0;
-    const int MAX_EOF_RETRY = 2;
     
     // 解码直到目标帧
     while (true) {
         int ret = av_read_frame(fmt_ctx_, packet_);
         if (ret < 0) {
             if (ret == AVERROR_EOF) {
-                eof_retry_count++;
-                if (eof_retry_count > MAX_EOF_RETRY) {
-                    DBG_LOGE("GPUDecoder: EOF reached %d times, giving up on frame %d\n", 
-                             eof_retry_count, target_frame);
-                    return false;
-                }
-                // 到达文件末尾，重新seek到开头
-                DBG_LOGW("GPUDecoder: EOF reached, seeking to start (retry %d)\n", eof_retry_count);
-                av_seek_frame(fmt_ctx_, video_stream_idx_, 0, AVSEEK_FLAG_BACKWARD);
-                avcodec_flush_buffers(codec_ctx_);
-                current_frame_ = -1;
-                continue;
+                // 到达文件末尾，直接返回false，让调用方复用上一帧
+                // 不要seek到开头，因为那样会很慢
+                DBG_LOGW("GPUDecoder: EOF reached at frame %d (target=%d), will reuse last frame\n", 
+                         current_frame_, target_frame);
+                return false;
             }
             return false;
         }
