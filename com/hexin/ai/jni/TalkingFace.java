@@ -19,6 +19,11 @@ public class TalkingFace {
 
     public native boolean stop();
 
+    // 性能测试接口
+    public native void startPerfTest(int durationMinutes);  // 开始性能测试，设置时长(分钟)
+    public native long getPerfFrameCount();                  // 获取渲染帧数
+    public native void resetPerfCounter();                   // 重置计数器
+
     static {
         System.load("/mnt/data/vision-devel/zhangyiwei/lipsync-master/build/libtalkingface.so"); // 加载动态链接库 
     }
@@ -88,7 +93,7 @@ public class TalkingFace {
         // msg = tf.render(src_video_path, audioPath, faceJsonSavePath, saveVideoPath, videoParams, vocalAudioPath, idParams);
         // System.out.println(msg);
 
-        src_video_path = "/mnt/data/vision-devel/zhangyiwei/lipsync-sdk-master/input/bb0087c4ff364deb97cdea8d5e4aaf3b.mp4";
+        src_video_path = "/mnt/data/vision-devel/zhangyiwei/lipsync-sdk-master/input/vedio.mp4";
         // src_video_path = "/workspace/project/talkingface/assets/0620/4k_25fps.mp4";
         audioPath = "/mnt/data/vision-devel/zhangyiwei/lipsync-sdk-master/input/audio.wav";
         saveVideoPath = "/mnt/data/vision-devel/zhangyiwei/lipsync-sdk-master/output/out.mp4";

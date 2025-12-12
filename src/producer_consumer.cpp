@@ -4,6 +4,29 @@
 std::mutex mtx;
 std::condition_variable m_cond_write;
 
+// 性能测试全局变量定义
+std::atomic<long> g_total_rendered_frames(0);
+std::chrono::steady_clock::time_point g_test_start_time;
+int g_test_duration_minutes = 0;
+
+// 性能测试接口实现
+void TalkingFace::startPerfTest(int duration_minutes) {
+    g_total_rendered_frames = 0;
+    g_test_duration_minutes = duration_minutes;
+    g_test_start_time = std::chrono::steady_clock::now();
+    DBG_LOGI("Performance test started, duration: %d minutes\n", duration_minutes);
+}
+
+long TalkingFace::getPerfFrameCount() {
+    return g_total_rendered_frames.load();
+}
+
+void TalkingFace::resetPerfCounter() {
+    g_total_rendered_frames = 0;
+    g_test_duration_minutes = 0;
+    DBG_LOGI("Performance counter reset\n");
+}
+
 void TalkingFace::renderProducer(int work_idx)
 {
     DBG_LOGI("render producer %d thread start.\n", work_idx);
@@ -42,11 +65,11 @@ void TalkingFace::renderProducer(int work_idx)
         double t_download = (double)cv::getTickCount();
         double freq = cv::getTickFrequency();
         
-        DBG_LOGI("Producer[%d] render_idx=%d diban_idx=%d | gpu_decode=%.1fms gpu_resize=%.1fms download=%.1fms\n",
-                 work_idx, render_idx, diban_idx,
-                 (t_gpu_decode - t_gpu_start) * 1000 / freq,
-                 (t_gpu_resize - t_gpu_decode) * 1000 / freq,
-                 (t_download - t_gpu_resize) * 1000 / freq);
+        // DBG_LOGI("Producer[%d] render_idx=%d diban_idx=%d | gpu_decode=%.1fms gpu_resize=%.1fms download=%.1fms\n",
+        //          work_idx, render_idx, diban_idx,
+        //          (t_gpu_decode - t_gpu_start) * 1000 / freq,
+        //          (t_gpu_resize - t_gpu_decode) * 1000 / freq,
+        //          (t_download - t_gpu_resize) * 1000 / freq);
 
         // cv::Mat frame_src = frame.clone();
 
@@ -173,6 +196,15 @@ void TalkingFace::renderProducer(int work_idx)
         }
 
         cnt++;
+
+        // 性能测试：统计渲染帧数（在时间限制内）
+        if (g_test_duration_minutes > 0) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::minutes>(now - g_test_start_time).count();
+            if (elapsed < g_test_duration_minutes) {
+                g_total_rendered_frames++;
+            }
+        }
     }
 
     double t1 = ((double)cv::getTickCount() - t0) / cv::getTickFrequency();

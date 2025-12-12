@@ -286,3 +286,19 @@ JNIEXPORT jboolean JNICALL Java_com_hexin_ai_jni_TalkingFace_stop(JNIEnv *env, j
 
     return JNI_TRUE;
 }
+
+// 性能测试接口
+JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_startPerfTest(JNIEnv *env, jobject obj, jint durationMinutes)
+{
+    TalkingFace::startPerfTest(durationMinutes);
+}
+
+JNIEXPORT jlong JNICALL Java_com_hexin_ai_jni_TalkingFace_getPerfFrameCount(JNIEnv *env, jobject obj)
+{
+    return TalkingFace::getPerfFrameCount();
+}
+
+JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_resetPerfCounter(JNIEnv *env, jobject obj)
+{
+    TalkingFace::resetPerfCounter();
+}

@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <cstdio>
 #include <mutex>
+#include <atomic>
+#include <chrono>
 #include <opencv2/core/core.hpp>
 #include "opencv2/core.hpp"
 #include "opencv2/imgproc.hpp"
@@ -93,6 +95,11 @@ struct Infos
         *this = Infos();
     }
 };
+
+// 性能测试：全局帧计数器
+extern std::atomic<long> g_total_rendered_frames;   // 总渲染帧数
+extern std::chrono::steady_clock::time_point g_test_start_time;  // 测试开始时间
+extern int g_test_duration_minutes;  // 测试时长(分钟)，0表示不限制
 
 class TalkingFace
 {
@@ -213,6 +220,11 @@ public:
                   const char *id_params);
 
     Status stop();
+
+    // 性能测试接口
+    static void startPerfTest(int duration_minutes);  // 开始性能测试
+    static long getPerfFrameCount();                   // 获取渲染帧数
+    static void resetPerfCounter();                    // 重置计数器
 
     // Ort::Env ort_env;
 };

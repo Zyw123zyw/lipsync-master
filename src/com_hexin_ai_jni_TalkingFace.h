@@ -55,6 +55,30 @@ JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_shutup
 JNIEXPORT jboolean JNICALL Java_com_hexin_ai_jni_TalkingFace_stop
   (JNIEnv *, jobject);
 
+/*
+ * Class:     com_hexin_ai_jni_TalkingFace
+ * Method:    startPerfTest
+ * Signature: (I)V
+ */
+JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_startPerfTest
+  (JNIEnv *, jobject, jint);
+
+/*
+ * Class:     com_hexin_ai_jni_TalkingFace
+ * Method:    getPerfFrameCount
+ * Signature: ()J
+ */
+JNIEXPORT jlong JNICALL Java_com_hexin_ai_jni_TalkingFace_getPerfFrameCount
+  (JNIEnv *, jobject);
+
+/*
+ * Class:     com_hexin_ai_jni_TalkingFace
+ * Method:    resetPerfCounter
+ * Signature: ()V
+ */
+JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_resetPerfCounter
+  (JNIEnv *, jobject);
+
 #ifdef __cplusplus
 }
 #endif
