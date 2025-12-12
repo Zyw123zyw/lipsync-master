@@ -6,7 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 多路并发性能测试 - 使用C++层帧计数
+ * 多路并发性能测试 - 多实例模式
  */
 public class TalkingFaceMultiTest {
 
@@ -19,7 +19,6 @@ public class TalkingFaceMultiTest {
     private static final String OUTPUT_DIR = "/mnt/data/vision-devel/zhangyiwei/lipsync-sdk-master/output/";
     // ================================
 
-    private static TalkingFace tf;
     private static volatile boolean running = true;
     private static AtomicInteger successTasks = new AtomicInteger(0);
     private static AtomicInteger failTasks = new AtomicInteger(0);
@@ -30,22 +29,27 @@ public class TalkingFaceMultiTest {
         final long runMillis = runMinutes * 60 * 1000L;
 
         System.out.println("========================================");
-        System.out.println("多路并发性能测试 (C++层帧计数)");
+        System.out.println("多路并发性能测试 (多实例模式)");
         System.out.println("并发路数: " + concurrentNum);
         System.out.println("运行时长: " + runMinutes + " 分钟");
         System.out.println("========================================\n");
 
-        // 初始化
-        tf = new TalkingFace();
-        tf.sayHello();
-        
+        // 创建多个实例
+        System.out.println("创建 " + concurrentNum + " 个TalkingFace实例...");
+        TalkingFace[] instances = new TalkingFace[concurrentNum];
         long initStart = System.currentTimeMillis();
-        tf.init(0, 2, 4, MODEL_DIR);
+        
+        for (int i = 0; i < concurrentNum; i++) {
+            instances[i] = new TalkingFace();
+            instances[i].init(0, 2, 4, MODEL_DIR);
+            System.out.println("实例 " + i + " 初始化完成");
+        }
+        
         long initEnd = System.currentTimeMillis();
-        System.out.println("初始化耗时: " + (initEnd - initStart) + "ms\n");
+        System.out.println("所有实例初始化完成，总耗时: " + (initEnd - initStart) + "ms\n");
 
         // 开始性能测试计时
-        tf.startPerfTest(runMinutes);
+        TalkingFace.startPerfTest(runMinutes);
         
         ExecutorService executor = Executors.newFixedThreadPool(concurrentNum);
         long testStart = System.currentTimeMillis();
@@ -67,7 +71,7 @@ public class TalkingFaceMultiTest {
                     Thread.sleep(30000);
                     if (running) {
                         long elapsed = System.currentTimeMillis() - testStart;
-                        long frames = tf.getPerfFrameCount();
+                        long frames = TalkingFace.getPerfFrameCount();
                         System.out.println(String.format(
                             "[进度] 已运行: %.1f分钟, 完成任务: %d, 渲染帧数: %d, 实时FPS: %.2f",
                             elapsed / 60000.0, successTasks.get(), frames, 
@@ -79,11 +83,12 @@ public class TalkingFaceMultiTest {
         progressThread.setDaemon(true);
         progressThread.start();
 
-        // 提交任务
+        // 提交任务 - 每路使用独立实例
         List<Future<?>> futures = new ArrayList<>();
         for (int i = 0; i < concurrentNum; i++) {
             final int threadId = i;
-            futures.add(executor.submit(() -> runRenderLoop(threadId)));
+            final TalkingFace instance = instances[i];
+            futures.add(executor.submit(() -> runRenderLoop(threadId, instance)));
         }
 
         // 等待完成
@@ -92,16 +97,22 @@ public class TalkingFaceMultiTest {
         }
 
         long testEnd = System.currentTimeMillis();
-        long totalFrames = tf.getPerfFrameCount();
+        long totalFrames = TalkingFace.getPerfFrameCount();
 
         // 输出结果
         printStatistics(testStart, testEnd, concurrentNum, runMinutes, totalFrames);
 
+        // 清理
         executor.shutdown();
-        tf.stop();
+        System.out.println("\n清理实例...");
+        for (int i = 0; i < concurrentNum; i++) {
+            instances[i].stop();
+            instances[i].destroy();
+        }
+        System.out.println("完成");
     }
 
-    private static void runRenderLoop(int threadId) {
+    private static void runRenderLoop(int threadId, TalkingFace instance) {
         String videoParams = "{\"video_enhance\":0}";
         String saveVideoPath = OUTPUT_DIR + "out_thread" + threadId + ".mp4";
         int iteration = 0;
@@ -111,8 +122,8 @@ public class TalkingFaceMultiTest {
             
             long start = System.currentTimeMillis();
             try {
-                String msg = tf.render(INPUT_VIDEO, INPUT_AUDIO, "", 
-                                       saveVideoPath, videoParams, "", "");
+                String msg = instance.render(INPUT_VIDEO, INPUT_AUDIO, "", 
+                                             saveVideoPath, videoParams, "", "");
                 long cost = System.currentTimeMillis() - start;
                 
                 boolean success = msg != null && msg.contains("success");

@@ -135,7 +135,7 @@ void TalkingFace::getVideoLandmark(int work_idx)
             break;
 
         std::sprintf(buffer, "/%06d.jpg", img_idx);
-        framepath = (std::string)tmp_frame_dir + std::string(buffer);
+        framepath = std::string(tmp_frame_dir()) + std::string(buffer);
         frame = cv::imread(framepath);
 
         cv::Rect2i box(0, 0, 0, 0);

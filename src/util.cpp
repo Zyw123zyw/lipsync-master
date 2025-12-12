@@ -452,8 +452,8 @@ Status TalkingFace::readVideo(const char *src_video_path)
             }
 
             // 添加输出路径
-            convert_command_cuda += (" " + std::string(tmp_convert_video_path));
-            convert_command_cpu += (" " + std::string(tmp_convert_video_path));
+            convert_command_cuda += (" " + std::string(tmp_convert_video_path()));
+            convert_command_cpu += (" " + std::string(tmp_convert_video_path()));
 
             try
             {
@@ -471,7 +471,7 @@ Status TalkingFace::readVideo(const char *src_video_path)
             }
 
             // 再次校验
-            video_status = readVideoInfo(tmp_convert_video_path, frame_width, frame_height, fps, bitrate);
+            video_status = readVideoInfo(tmp_convert_video_path(), frame_width, frame_height, fps, bitrate);
             if (!video_status.IsOk())
                 return video_status;
 
@@ -531,7 +531,7 @@ Status TalkingFace::readVideo(const char *src_video_path)
         std::string input_path;
         if (is_convert)
         {
-            input_path = "-i " + (std::string)tmp_convert_video_path;
+            input_path = "-i " + std::string(tmp_convert_video_path());
         }
         else
         {
@@ -570,7 +570,7 @@ Status TalkingFace::readVideo(const char *src_video_path)
         std::string output_args = " -start_number 0 -qmin 1 -q:v 1 -r " + std::to_string(infos.fps);
         if (ffmpeg_threads > 0)
             output_args += (" -threads " + (std::to_string)(ffmpeg_threads));
-        output_args += (" " + (std::string)tmp_frame_dir + "/%06d.jpg");
+        output_args += (" " + std::string(tmp_frame_dir()) + "/%06d.jpg");
 
         frame_command_cuda += output_args;
         frame_command_cpu += output_args;
@@ -593,7 +593,7 @@ Status TalkingFace::readVideo(const char *src_video_path)
         // 获取图像帧序列的路径
         try
         {
-            this->traverseFiles((std::string)tmp_frame_dir, infos.frame_paths, "jpg");
+            this->traverseFiles(std::string(tmp_frame_dir()), infos.frame_paths, "jpg");
         }
         catch(...)
         {
@@ -633,8 +633,8 @@ Status TalkingFace::audioDubbing(const char *audio_path, const char *render_vide
     }
 
     // 两个版本都添加输入视频
-    ffmpeg_command_cuda += ("-i " + (std::string)tmp_video_path);
-    ffmpeg_command_cpu += ("-i " + (std::string)tmp_video_path);
+    ffmpeg_command_cuda += ("-i " + std::string(tmp_video_path()));
+    ffmpeg_command_cpu += ("-i " + std::string(tmp_video_path()));
 
     // 叠加音频，如果存在音频时长限制则截断（音频处理不需要CUDA）
     if (video_params.audio_max_time > 0)
@@ -643,7 +643,7 @@ Status TalkingFace::audioDubbing(const char *audio_path, const char *render_vide
 
         if (ffmpeg_threads > 0)
             ffmpeg_crop_audio += (" -threads " + (std::to_string)(ffmpeg_threads));
-        ffmpeg_crop_audio += (" " + (std::string)(tmp_crop_audio_path));
+        ffmpeg_crop_audio += (" " + std::string(tmp_crop_audio_path()));
 
         DBG_LOGI("ffmpeg dubbing crop audio command:  %s\n", ffmpeg_crop_audio.c_str());
         try
@@ -659,7 +659,7 @@ Status TalkingFace::audioDubbing(const char *audio_path, const char *render_vide
             DBG_LOGE("ffmpeg dubbing crop audio fail.\n");
             return Status(Status::Code::AUDIO_DUBBING_FAIL, "ffmpeg dubbing crop audio fail.");
         }
-        std::string audio_args = " -i " + (std::string)tmp_crop_audio_path + " -map 0:v:0 -map 1:a:0";
+        std::string audio_args = " -i " + std::string(tmp_crop_audio_path()) + " -map 0:v:0 -map 1:a:0";
         ffmpeg_command_cuda += audio_args;
         ffmpeg_command_cpu += audio_args;
     }

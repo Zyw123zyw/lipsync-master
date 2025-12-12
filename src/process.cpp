@@ -8,7 +8,7 @@ Status TalkingFace::process(const char *src_video_path, const char *info_save_pa
         infos.reset();
 
         // 创建tmp路径
-        std::string dir_command = "mkdir -p " + (std::string)tmp_frame_dir;
+        std::string dir_command = "mkdir -p " + std::string(tmp_frame_dir());
         system(dir_command.c_str());
 
         // 获取传参

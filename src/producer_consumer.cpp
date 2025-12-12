@@ -1,8 +1,7 @@
 #include "talkingface.h"
 #include <opencv2/cudawarping.hpp>
 
-std::mutex mtx;
-std::condition_variable m_cond_write;
+// 注意：mtx 和 m_cond_write 已移到 Infos 结构体中，支持多实例
 
 // 性能测试全局变量定义
 std::atomic<long> g_total_rendered_frames(0);
@@ -160,9 +159,9 @@ void TalkingFace::renderProducer(int work_idx)
             }
         }
         
-        std::unique_lock<std::mutex> lock(mtx);
+        std::unique_lock<std::mutex> lock(infos.mtx);
         while (infos.last_idx != (render_idx - 1) || infos.rendered_frames.size() > 1)
-            m_cond_write.wait(lock);
+            infos.cond_write.wait(lock);
 
         infos.last_idx = render_idx;
         infos.rendered_frames.push(frame);
@@ -171,7 +170,7 @@ void TalkingFace::renderProducer(int work_idx)
         // cv::hconcat(frame_src, frame, combined_frame);
         // infos.rendered_frames.push(combined_frame);
 
-        m_cond_write.notify_all();
+        infos.cond_write.notify_all();
 
         // 缓存底板帧的detect结果
         if (infos.face_bboxes.size() == 0)
@@ -220,14 +219,14 @@ void TalkingFace::writeConsumer()
     int write_idx = 0;
     while (1)
     {
-        std::unique_lock<std::mutex> lock(mtx);
+        std::unique_lock<std::mutex> lock(infos.mtx);
         while (infos.rendered_frames.empty())
-            m_cond_write.wait(lock);
+            infos.cond_write.wait(lock);
 
         frame = infos.rendered_frames.front();
         infos.rendered_frames.pop();
         
-        m_cond_write.notify_all();
+        infos.cond_write.notify_all();
 
         infos.video_writer.write(frame);
 

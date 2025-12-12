@@ -1,8 +1,24 @@
 #include "talkingface.h"
 
+// 静态成员初始化
+std::atomic<int> TalkingFace::s_instance_counter(0);
+
 TalkingFace::TalkingFace()
 {
     is_running = false;
+    
+    // 生成唯一实例ID
+    instance_id_ = s_instance_counter.fetch_add(1);
+    
+    // 初始化实例独立的tmp目录
+    instance_tmp_dir_ = "./tmp/instance_" + std::to_string(instance_id_) + "/";
+    instance_tmp_audio_path_ = instance_tmp_dir_ + "audio.wav";
+    instance_tmp_video_path_ = instance_tmp_dir_ + "video.mp4";
+    instance_tmp_convert_video_path_ = instance_tmp_dir_ + "convert_video.mp4";
+    instance_tmp_frame_dir_ = instance_tmp_dir_ + "frames";
+    instance_tmp_crop_audio_path_ = instance_tmp_dir_ + "crop_audio.wav";
+    
+    DBG_LOGI("TalkingFace instance %d created, tmp_dir: %s\n", instance_id_, instance_tmp_dir_.c_str());
 }
 
 Status TalkingFace::init(const std::string model_dir, int n, int fn)
@@ -146,7 +162,7 @@ Status TalkingFace::init(const std::string model_dir, int n, int fn)
 
 Status TalkingFace::stop()
 {
-    DBG_LOGI("----------------------TalkingFace stop start-----------------------------.\n");
+    DBG_LOGI("----------------------TalkingFace instance %d stop start-----------------------------.\n", instance_id_);
     if (audio_extractor)
         delete audio_extractor;
     
@@ -158,6 +174,12 @@ Status TalkingFace::stop()
         m_generators[i] = nullptr;
         m_enhancers[i] = nullptr;
     }
-    DBG_LOGI("----------------------TalkingFace stop end-----------------------------.\n");
+    
+    // 清理实例的tmp目录
+    std::string delete_command = "rm -rf " + instance_tmp_dir_;
+    system(delete_command.c_str());
+    DBG_LOGI("Cleaned up tmp dir: %s\n", instance_tmp_dir_.c_str());
+    
+    DBG_LOGI("----------------------TalkingFace instance %d stop end-----------------------------.\n", instance_id_);
     return Status::Success;
 }

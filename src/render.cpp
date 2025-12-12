@@ -13,7 +13,7 @@ Status TalkingFace::render(const char *src_video_path,
     infos.reset();
 
     // 创建tmp路径
-    std::string dir_command = "mkdir -p " + (std::string)tmp_frame_dir;
+    std::string dir_command = "mkdir -p " + std::string(tmp_frame_dir());
     system(dir_command.c_str());
 
     // 获取传参
@@ -139,7 +139,7 @@ Status TalkingFace::render(const char *src_video_path,
         render_threads.emplace_back(std::thread(&TalkingFace::renderProducer, this, i));
 
     // 开启写入线程
-    infos.video_writer.open(tmp_video_path, infos.render_codec, infos.fps, cv::Size2d(infos.video_width, infos.video_height));
+    infos.video_writer.open(tmp_video_path(), infos.render_codec, infos.fps, cv::Size2d(infos.video_width, infos.video_height));
     std::thread writer_thread(&TalkingFace::writeConsumer, this);
 
     for (int i = 0; i < n_threads; i++)
@@ -150,7 +150,7 @@ Status TalkingFace::render(const char *src_video_path,
     try
     {
         cv::VideoCapture cap;
-        cap.open(tmp_video_path);
+        cap.open(tmp_video_path());
         if (!cap.isOpened())
         {
             DBG_LOGE("tmp video check fail.\n");

@@ -9,9 +9,7 @@
 #include "talkingface.h"
 #include "error_code.h"
 
-
-static TalkingFace *talkingface = 0;
-static bool intFlag = false;
+// 多实例模式：通过handle管理实例
 
 JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_sayHello(JNIEnv *env, jobject obj)
 {
@@ -19,135 +17,96 @@ JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_sayHello(JNIEnv *env, j
     return;
 }
 
-JNIEXPORT jboolean JNICALL Java_com_hexin_ai_jni_TalkingFace_init(JNIEnv *env, jobject obj, jint gpu_id, jint numWorkers, jint ffmpegThreads, jstring modelDir)
+// 创建实例
+JNIEXPORT jlong JNICALL Java_com_hexin_ai_jni_TalkingFace_nativeCreate(JNIEnv *env, jobject obj)
 {
-    if (intFlag == true)
-    {
-        DBG_LOGI("Already initialized\n");
-        return JNI_TRUE;
-    }
+    TalkingFace* instance = new TalkingFace();
+    DBG_LOGI("TalkingFace instance created: %p (id=%d)\n", instance, instance->getInstanceId());
+    return reinterpret_cast<jlong>(instance);
+}
 
-    //**************************************************************//
-    DBG_LOGI("TalkingFace Model Init Begin\n");
-    const char *model_dir = env->GetStringUTFChars(modelDir, 0);
-    std::string model_dir_str = model_dir;
-    Status status;
-    if (!talkingface)
-    {
-        talkingface = new TalkingFace();
-        status = talkingface->init(model_dir_str, numWorkers, ffmpegThreads);
-    }
-    else
-    {
-        delete talkingface;
-        talkingface = 0;
-        talkingface = new TalkingFace();
-        status = talkingface->init(model_dir_str, numWorkers, ffmpegThreads);
-    }
-    DBG_LOGI("TalkingFace Model Init Done\n");
-    //**************************************************************//
-
-    env->ReleaseStringUTFChars(modelDir, model_dir);
-
-    if (status.IsOk())
-    {
-        intFlag = true;
-        return JNI_TRUE;
-    }
-    else
-    {
-        return JNI_FALSE;
+// 销毁实例
+JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_nativeDestroy(JNIEnv *env, jobject obj, jlong handle)
+{
+    TalkingFace* instance = reinterpret_cast<TalkingFace*>(handle);
+    if (instance) {
+        DBG_LOGI("TalkingFace instance destroying: %p (id=%d)\n", instance, instance->getInstanceId());
+        instance->stop();
+        delete instance;
     }
 }
 
-// JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_process(JNIEnv *env, jobject obj,
-//                                                                           jstring src_video_path,
-//                                                                           jstring json_save_path,
-//                                                                           jstring video_params)
-// {
-//     std::string msg;
-//     Status status;
+JNIEXPORT jboolean JNICALL Java_com_hexin_ai_jni_TalkingFace_init(JNIEnv *env, jobject obj, jlong handle, jint gpu_id, jint numWorkers, jint ffmpegThreads, jstring modelDir)
+{
+    TalkingFace* instance = reinterpret_cast<TalkingFace*>(handle);
+    if (!instance) {
+        DBG_LOGE("Invalid handle\n");
+        return JNI_FALSE;
+    }
 
-//     DBG_LOGE("process interface is deprecated.\n");
-//     status = Status(
-//         Status::Code::PROCESS_PREDICT_FAIL, "process interface is deprecated");
+    DBG_LOGI("TalkingFace instance %d init begin\n", instance->getInstanceId());
+    const char *model_dir = env->GetStringUTFChars(modelDir, 0);
+    std::string model_dir_str = model_dir;
+    
+    Status status = instance->init(model_dir_str, numWorkers, ffmpegThreads);
+    
+    DBG_LOGI("TalkingFace instance %d init done\n", instance->getInstanceId());
+    env->ReleaseStringUTFChars(modelDir, model_dir);
 
-//     msg = status.AsString();
-//     const char *msg_char = msg.c_str();
-//     jstring jstrmsg = env->NewStringUTF(msg_char);
-//     return jstrmsg;
-// }
+    return status.IsOk() ? JNI_TRUE : JNI_FALSE;
+}
 
-JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_process(JNIEnv *env, jobject obj,
+JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_process(JNIEnv *env, jobject obj, jlong handle,
                                                                           jstring src_video_path,
                                                                           jstring json_save_path,
                                                                           jstring video_params)
 {
-
     std::string msg;
     Status status;
+
+    TalkingFace* instance = reinterpret_cast<TalkingFace*>(handle);
+    if (!instance) {
+        status = Status(Status::Code::MODEL_INIT_FAIL, "Invalid handle");
+        msg = status.AsString();
+        return env->NewStringUTF(msg.c_str());
+    }
 
     const char *srcVideoPath = env->GetStringUTFChars(src_video_path, 0);
     const char *jsonSavePath = env->GetStringUTFChars(json_save_path, 0);
     const char *videoParams = env->GetStringUTFChars(video_params, 0);
 
-    if (talkingface)
+    double modelStart = (double)cv::getTickCount();
+    try
     {
-        double modelStart = (double)cv::getTickCount();
-        try
-        {
-            status = talkingface->process(srcVideoPath, jsonSavePath, videoParams);
-            DBG_LOGI("Get process done and has been feedback.\n");
-        }
-        catch(...)
-        {
-            DBG_LOGE("process predict fail.\n");
-            status = Status(
-                Status::Code::PROCESS_PREDICT_FAIL, "process predict fail");
-        }
-
-        // delete tmp dir
-        std::string delete_command = "rm -rf " + (std::string)talkingface->tmp_dir;
-        try
-        {
-            int dir_status_code = system(delete_command.c_str());
-            if (dir_status_code != 0)
-            {
-                DBG_LOGE("delete tmp file fail.\n");
-                status = Status(
-                    Status::Code::FILE_TMP_DELETE_FAIL, "delete tmp file fail");
-            }
-        }
-        catch(...)
-        {
-            DBG_LOGE("delete tmp file fail.\n");
-            status = Status(
-                Status::Code::FILE_TMP_DELETE_FAIL, "delete tmp file fail");
-        }
-
-        double modelTime = ((double)cv::getTickCount() - modelStart) / cv::getTickFrequency();
-        DBG_LOGI("process time: %f s\n", modelTime);
+        status = instance->process(srcVideoPath, jsonSavePath, videoParams);
+        DBG_LOGI("Instance %d process done.\n", instance->getInstanceId());
     }
-    else
+    catch(...)
     {
-        DBG_LOGE("extractor does not init when it predict.\n");
-        status = Status(
-            Status::Code::MODEL_INIT_FAIL,
-            "extractor call predict but extractor is not loaded");
+        DBG_LOGE("Instance %d process fail.\n", instance->getInstanceId());
+        status = Status(Status::Code::PROCESS_PREDICT_FAIL, "process predict fail");
     }
+
+    // delete tmp dir
+    std::string delete_command = "rm -rf " + std::string(instance->tmp_dir());
+    try
+    {
+        system(delete_command.c_str());
+    }
+    catch(...) {}
+
+    double modelTime = ((double)cv::getTickCount() - modelStart) / cv::getTickFrequency();
+    DBG_LOGI("Instance %d process time: %f s\n", instance->getInstanceId(), modelTime);
 
     msg = status.AsString();
-    const char *msg_char = msg.c_str();
-    jstring jstrmsg = env->NewStringUTF(msg_char);
-
     env->ReleaseStringUTFChars(src_video_path, srcVideoPath);
     env->ReleaseStringUTFChars(json_save_path, jsonSavePath);
     env->ReleaseStringUTFChars(video_params, videoParams);
 
-    return jstrmsg;
+    return env->NewStringUTF(msg.c_str());
 }
 
-JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_render(JNIEnv *env, jobject obj,
+JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_render(JNIEnv *env, jobject obj, jlong handle,
                                                                          jstring src_video_path,
                                                                          jstring audio_path,
                                                                          jstring json_save_path,
@@ -159,6 +118,13 @@ JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_render(JNIEnv *env, 
     std::string msg;
     Status status;
 
+    TalkingFace* instance = reinterpret_cast<TalkingFace*>(handle);
+    if (!instance) {
+        status = Status(Status::Code::MODEL_INIT_FAIL, "Invalid handle");
+        msg = status.AsString();
+        return env->NewStringUTF(msg.c_str());
+    }
+
     const char *srcVideoPath = env->GetStringUTFChars(src_video_path, 0);
     const char *audioPath = env->GetStringUTFChars(audio_path, 0);
     const char *jsonSavePath = env->GetStringUTFChars(json_save_path, 0);
@@ -167,50 +133,30 @@ JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_render(JNIEnv *env, 
     const char *vocalAudioPath = env->GetStringUTFChars(vocal_audio_path, 0);
     const char *idParams = env->GetStringUTFChars(id_params, 0);
 
-    if (talkingface)
+    double modelStart = (double)cv::getTickCount();
+    try
     {
-        double modelStart = (double)cv::getTickCount();
-        try
-        {
-            status = talkingface->render(srcVideoPath, audioPath, jsonSavePath, renderVideoSavePath, videoParams, vocalAudioPath, idParams);
-            DBG_LOGI("Get render done and has been feedback.\n");
-        }
-        catch(...)
-        {
-            DBG_LOGE("render predict fail.\n");
-            status = Status(Status::Code::RENDER_PREDICT_FAIL, "render predict fail");
-        }
-
-        // delete tmp dir
-        std::string delete_command = "rm -rf " + (std::string)talkingface->tmp_dir;
-        try
-        {
-            int dir_status_code = system(delete_command.c_str());
-            if (dir_status_code != 0)
-            {
-                DBG_LOGE("delete tmp file fail.\n");
-                status = Status(Status::Code::FILE_TMP_DELETE_FAIL, "delete tmp file fail");
-            }
-        }
-        catch(...)
-        {
-            DBG_LOGE("delete tmp file fail.\n");
-            status = Status(Status::Code::FILE_TMP_DELETE_FAIL, "delete tmp file fail");
-        }
-
-        double modelTime = ((double)cv::getTickCount() - modelStart) / cv::getTickFrequency();
-        DBG_LOGI("render time: %f s\n", modelTime);
+        status = instance->render(srcVideoPath, audioPath, jsonSavePath, renderVideoSavePath, videoParams, vocalAudioPath, idParams);
+        DBG_LOGI("Instance %d render done.\n", instance->getInstanceId());
     }
-    else
+    catch(...)
     {
-        DBG_LOGE("model not init.\n");
-        status = Status(Status::Code::MODEL_INIT_FAIL, "model not init");
+        DBG_LOGE("Instance %d render fail.\n", instance->getInstanceId());
+        status = Status(Status::Code::RENDER_PREDICT_FAIL, "render predict fail");
     }
+
+    // delete tmp dir
+    std::string delete_command = "rm -rf " + std::string(instance->tmp_dir());
+    try
+    {
+        system(delete_command.c_str());
+    }
+    catch(...) {}
+
+    double modelTime = ((double)cv::getTickCount() - modelStart) / cv::getTickFrequency();
+    DBG_LOGI("Instance %d render time: %f s\n", instance->getInstanceId(), modelTime);
 
     msg = status.AsString();
-    const char *msg_char = msg.c_str();
-    jstring jstrmsg = env->NewStringUTF(msg_char);
-
     env->ReleaseStringUTFChars(src_video_path, srcVideoPath);
     env->ReleaseStringUTFChars(audio_path, audioPath);
     env->ReleaseStringUTFChars(json_save_path, jsonSavePath);
@@ -219,11 +165,10 @@ JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_render(JNIEnv *env, 
     env->ReleaseStringUTFChars(vocal_audio_path, vocalAudioPath);
     env->ReleaseStringUTFChars(id_params, idParams);
 
-    return jstrmsg;
+    return env->NewStringUTF(msg.c_str());
 }
 
-
-JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_shutup(JNIEnv *env, jobject obj,
+JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_shutup(JNIEnv *env, jobject obj, jlong handle,
                                                                          jstring image_path,
                                                                          jstring save_path,
                                                                          jstring video_params,
@@ -232,73 +177,63 @@ JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_shutup(JNIEnv *env, 
     std::string msg;
     Status status;
 
+    TalkingFace* instance = reinterpret_cast<TalkingFace*>(handle);
+    if (!instance) {
+        status = Status(Status::Code::MODEL_INIT_FAIL, "Invalid handle");
+        msg = status.AsString();
+        return env->NewStringUTF(msg.c_str());
+    }
+
     const char *imagePath = env->GetStringUTFChars(image_path, 0);
     const char *savePath = env->GetStringUTFChars(save_path, 0);
     const char *videoParams = env->GetStringUTFChars(video_params, 0);
     const char *idParams = env->GetStringUTFChars(id_params, 0);
 
-    if (talkingface)
+    double modelStart = (double)cv::getTickCount();
+    try
     {
-        double modelStart = (double)cv::getTickCount();
-        try
-        {
-            status = talkingface->shutup(imagePath, savePath, videoParams, idParams);
-            DBG_LOGI("Get shutup done and has been feedback.\n");
-        }
-        catch(...)
-        {
-            DBG_LOGE("shutup predict fail.\n");
-            status = Status(Status::Code::SHUT_UP_FAIL, "shutup predict fail");
-        }
+        status = instance->shutup(imagePath, savePath, videoParams, idParams);
+        DBG_LOGI("Instance %d shutup done.\n", instance->getInstanceId());
+    }
+    catch(...)
+    {
+        DBG_LOGE("Instance %d shutup fail.\n", instance->getInstanceId());
+        status = Status(Status::Code::SHUT_UP_FAIL, "shutup predict fail");
+    }
 
-        double modelTime = ((double)cv::getTickCount() - modelStart) / cv::getTickFrequency();
-        DBG_LOGI("shutup time: %f s\n", modelTime);
-    }
-    else
-    {
-        DBG_LOGE("model not init.\n");
-        status = Status(Status::Code::MODEL_INIT_FAIL, "model not init");
-    }
+    double modelTime = ((double)cv::getTickCount() - modelStart) / cv::getTickFrequency();
+    DBG_LOGI("Instance %d shutup time: %f s\n", instance->getInstanceId(), modelTime);
 
     msg = status.AsString();
-    const char *msg_char = msg.c_str();
-    jstring jstrmsg = env->NewStringUTF(msg_char);
-
     env->ReleaseStringUTFChars(image_path, imagePath);
     env->ReleaseStringUTFChars(save_path, savePath);
     env->ReleaseStringUTFChars(video_params, videoParams);
     env->ReleaseStringUTFChars(id_params, idParams);
 
-    return jstrmsg;
+    return env->NewStringUTF(msg.c_str());
 }
 
-JNIEXPORT jboolean JNICALL Java_com_hexin_ai_jni_TalkingFace_stop(JNIEnv *env, jobject obj)
+JNIEXPORT jboolean JNICALL Java_com_hexin_ai_jni_TalkingFace_stop(JNIEnv *env, jobject obj, jlong handle)
 {
-    //**************************************************************//
-
-    if (talkingface)
-    {
-        delete talkingface;
-        talkingface = 0;
-        free(talkingface);
+    TalkingFace* instance = reinterpret_cast<TalkingFace*>(handle);
+    if (instance) {
+        instance->stop();
     }
-    //**************************************************************//
-
     return JNI_TRUE;
 }
 
-// 性能测试接口
-JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_startPerfTest(JNIEnv *env, jobject obj, jint durationMinutes)
+// 性能测试接口（静态方法，不需要handle）
+JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_startPerfTest(JNIEnv *env, jclass cls, jint durationMinutes)
 {
     TalkingFace::startPerfTest(durationMinutes);
 }
 
-JNIEXPORT jlong JNICALL Java_com_hexin_ai_jni_TalkingFace_getPerfFrameCount(JNIEnv *env, jobject obj)
+JNIEXPORT jlong JNICALL Java_com_hexin_ai_jni_TalkingFace_getPerfFrameCount(JNIEnv *env, jclass cls)
 {
     return TalkingFace::getPerfFrameCount();
 }
 
-JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_resetPerfCounter(JNIEnv *env, jobject obj)
+JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_resetPerfCounter(JNIEnv *env, jclass cls)
 {
     TalkingFace::resetPerfCounter();
 }

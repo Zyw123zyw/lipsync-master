@@ -83,6 +83,10 @@ struct Infos
 
     std::queue<cv::Mat> rendered_frames;        // 渲染帧缓存
     cv::VideoWriter video_writer;
+    
+    // 多实例同步（每个实例独立）
+    std::mutex mtx;
+    std::condition_variable cond_write;
 
     // // // multi person，兼容单人情况
     // std::vector<std::vector<cv::Rect2i>> stamp_rois;    // 提前算好每一帧中的所有roi，兼容多人和单人情况
@@ -92,7 +96,24 @@ struct Infos
 
     void reset()
     {
-        *this = Infos();
+        // 注意：mutex和condition_variable不能直接赋值，需要特殊处理
+        video_width = 0;
+        video_height = 0;
+        frame_nums = 0;
+        fps = 0;
+        bitrate = 0;
+        frame_paths.clear();
+        face_bboxes.clear();
+        face_landmarks.clear();
+        last_idx = -1;
+        ids.clear();
+        id_rois.clear();
+        audio_feats.clear();
+        audio_cnts.clear();
+        audio_intervals.clear();
+        min_audio_cnt = -1;
+        while (!rendered_frames.empty()) rendered_frames.pop();
+        // video_writer 会在需要时重新打开
     }
 };
 
@@ -104,6 +125,16 @@ extern int g_test_duration_minutes;  // 测试时长(分钟)，0表示不限制
 class TalkingFace
 {
 private:
+    // 实例ID和独立tmp目录
+    static std::atomic<int> s_instance_counter;
+    int instance_id_;
+    std::string instance_tmp_dir_;
+    std::string instance_tmp_audio_path_;
+    std::string instance_tmp_video_path_;
+    std::string instance_tmp_convert_video_path_;
+    std::string instance_tmp_frame_dir_;
+    std::string instance_tmp_crop_audio_path_;
+
     int n_threads;      // 渲染线程数
     int ffmpeg_threads = 0; // ffmpeg线程数
 
@@ -190,15 +221,17 @@ private:
     int executeFFmpegWithFallback(const std::string& cuda_cmd, const std::string& cpu_cmd, const char* operation_name);
 
 public:
-    const char *tmp_dir = "./tmp";
-    const char *tmp_audio_path = "./tmp/audio.wav";
-    const char *tmp_video_path = "./tmp/video.mp4";
-    const char *tmp_convert_video_path = "./tmp/convert_video.mp4";
-    const char *tmp_frame_dir = "./tmp/frames";
-    const char *tmp_crop_audio_path = "./tmp/crop_audio.wav";
+    // tmp路径访问器（返回实例独立的路径）
+    const char* tmp_dir() const { return instance_tmp_dir_.c_str(); }
+    const char* tmp_audio_path() const { return instance_tmp_audio_path_.c_str(); }
+    const char* tmp_video_path() const { return instance_tmp_video_path_.c_str(); }
+    const char* tmp_convert_video_path() const { return instance_tmp_convert_video_path_.c_str(); }
+    const char* tmp_frame_dir() const { return instance_tmp_frame_dir_.c_str(); }
+    const char* tmp_crop_audio_path() const { return instance_tmp_crop_audio_path_.c_str(); }
+    int getInstanceId() const { return instance_id_; }
 
 public:
-    TalkingFace(/* args */);
+    TalkingFace();
 
     ~TalkingFace() = default;
 

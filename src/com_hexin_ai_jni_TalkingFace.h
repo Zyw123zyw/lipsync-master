@@ -7,77 +7,41 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/*
- * Class:     com_hexin_ai_jni_TalkingFace
- * Method:    sayHello
- * Signature: ()V
- */
+
 JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_sayHello
   (JNIEnv *, jobject);
 
-/*
- * Class:     com_hexin_ai_jni_TalkingFace
- * Method:    init
- * Signature: (ILjava/lang/String;)Z
- */
+// 多实例管理
+JNIEXPORT jlong JNICALL Java_com_hexin_ai_jni_TalkingFace_nativeCreate
+  (JNIEnv *, jobject);
+
+JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_nativeDestroy
+  (JNIEnv *, jobject, jlong);
+
 JNIEXPORT jboolean JNICALL Java_com_hexin_ai_jni_TalkingFace_init
-  (JNIEnv *, jobject, jint, jint, jint, jstring);
+  (JNIEnv *, jobject, jlong, jint, jint, jint, jstring);
 
-// /*
-//  * Class:     com_hexin_ai_jni_TalkingFace
-//  * Method:    process
-//  * Signature: (Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
-//  */
 JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_process
-  (JNIEnv *, jobject, jstring, jstring, jstring);
+  (JNIEnv *, jobject, jlong, jstring, jstring, jstring);
 
-/*
- * Class:     com_hexin_ai_jni_TalkingFace
- * Method:    render
- * Signature: (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
- */
 JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_render
-  (JNIEnv *, jobject, jstring, jstring, jstring, jstring, jstring, jstring, jstring);
+  (JNIEnv *, jobject, jlong, jstring, jstring, jstring, jstring, jstring, jstring, jstring);
 
-/*
- * Class:     com_hexin_ai_jni_TalkingFace
- * Method:    shutup
- * Signature: (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;
- */
 JNIEXPORT jstring JNICALL Java_com_hexin_ai_jni_TalkingFace_shutup
-  (JNIEnv *, jobject, jstring, jstring, jstring, jstring);
+  (JNIEnv *, jobject, jlong, jstring, jstring, jstring, jstring);
 
-/*
- * Class:     com_hexin_ai_jni_TalkingFace
- * Method:    stop
- * Signature: ()Z
- */
 JNIEXPORT jboolean JNICALL Java_com_hexin_ai_jni_TalkingFace_stop
-  (JNIEnv *, jobject);
+  (JNIEnv *, jobject, jlong);
 
-/*
- * Class:     com_hexin_ai_jni_TalkingFace
- * Method:    startPerfTest
- * Signature: (I)V
- */
+// 性能测试接口（静态方法）
 JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_startPerfTest
-  (JNIEnv *, jobject, jint);
+  (JNIEnv *, jclass, jint);
 
-/*
- * Class:     com_hexin_ai_jni_TalkingFace
- * Method:    getPerfFrameCount
- * Signature: ()J
- */
 JNIEXPORT jlong JNICALL Java_com_hexin_ai_jni_TalkingFace_getPerfFrameCount
-  (JNIEnv *, jobject);
+  (JNIEnv *, jclass);
 
-/*
- * Class:     com_hexin_ai_jni_TalkingFace
- * Method:    resetPerfCounter
- * Signature: ()V
- */
 JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_resetPerfCounter
-  (JNIEnv *, jobject);
+  (JNIEnv *, jclass);
 
 #ifdef __cplusplus
 }

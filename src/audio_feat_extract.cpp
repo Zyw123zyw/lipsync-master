@@ -24,7 +24,7 @@ Status TalkingFace::extractAudioFeat(const char *audio_path)
 
         if (ffmpeg_threads > 0)
             audio_command += (" -threads " + (std::to_string)(ffmpeg_threads));
-        audio_command += (" " + (std::string)tmp_audio_path);
+        audio_command += (" " + std::string(tmp_audio_path()));
 
         DBG_LOGI("ffmpeg audio command:  %s\n", audio_command.c_str());
         try
@@ -43,7 +43,7 @@ Status TalkingFace::extractAudioFeat(const char *audio_path)
         }
 
         // 判断转换后的音频是否存在，避免后面WavHelper直接崩溃
-        std::ifstream audioFile(tmp_audio_path);
+        std::ifstream audioFile(tmp_audio_path());
         if (!audioFile.is_open())
         {
             DBG_LOGE("extract audio feat fail, convert audio check fail.\n");
@@ -54,7 +54,7 @@ Status TalkingFace::extractAudioFeat(const char *audio_path)
         WavData data;
         try
         {
-            WavHelper::readWav(data, tmp_audio_path);
+            WavHelper::readWav(data, tmp_audio_path());
         }
         catch(...)
         {
