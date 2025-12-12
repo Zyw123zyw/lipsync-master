@@ -83,6 +83,13 @@ bool GPUDecoder::open(const std::string& video_path, int num_threads, int target
     // 4. 查找NVDEC解码器
     const AVCodec* decoder = nullptr;
     
+    // 强制使用软解码，避免 NVDEC 并发限制问题
+    // TODO: 可以通过参数控制是否使用硬解码
+    decoder = avcodec_find_decoder(codecpar->codec_id);
+    DBG_LOGI("GPUDecoder[%p]: Using software decoder to avoid NVDEC concurrency limit\n", this);
+    
+    /*
+    // 原硬解码逻辑（暂时禁用）
     // 根据编码格式选择对应的CUDA解码器
     switch (codecpar->codec_id) {
         case AV_CODEC_ID_H264:
@@ -106,6 +113,7 @@ bool GPUDecoder::open(const std::string& video_path, int num_threads, int target
         DBG_LOGW("GPUDecoder: NVDEC decoder not found for codec, falling back to software decoder\n");
         decoder = avcodec_find_decoder(codecpar->codec_id);
     }
+    */
     
     if (!decoder) {
         DBG_LOGE("GPUDecoder: Cannot find decoder\n");
@@ -129,11 +137,15 @@ bool GPUDecoder::open(const std::string& video_path, int num_threads, int target
         return false;
     }
     
-    // 6. 初始化CUDA硬件上下文
+    // 6. 初始化CUDA硬件上下文（软解码模式下跳过）
+    // 软解码不需要硬件上下文
+    /*
     if (!initHWContext()) {
         DBG_LOGW("GPUDecoder: Failed to init HW context, using software decoding\n");
         // 继续使用软解码
     }
+    */
+    DBG_LOGI("GPUDecoder[%p]: Skipping HW context init (software decode mode)\n", this);
     
     // 7. 打开解码器
     if (avcodec_open2(codec_ctx_, decoder, nullptr) < 0) {
