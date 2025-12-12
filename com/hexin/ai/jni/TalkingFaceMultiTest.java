@@ -150,6 +150,7 @@ public class TalkingFaceMultiTest {
                                          int targetMinutes, long totalFrames) {
         double totalSeconds = (end - start) / 1000.0;
         double totalMinutes = totalSeconds / 60.0;
+        double targetSeconds = targetMinutes * 60.0;  // 目标测试时长（秒）
         int totalTasks = successTasks.get() + failTasks.get();
         
         System.out.println("\n========================================");
@@ -166,9 +167,9 @@ public class TalkingFaceMultiTest {
         }
         System.out.println("----------------------------------------");
         System.out.println("【核心指标 - C++层精确统计】");
-        System.out.println("总渲染帧数: " + totalFrames + " 帧");
-        System.out.println("平均帧率 (FPS): " + String.format("%.2f", totalFrames / totalSeconds) + " 帧/秒");
-        System.out.println("每分钟渲染帧数: " + String.format("%.0f", totalFrames / totalMinutes) + " 帧/分钟");
+        System.out.println("总渲染帧数: " + totalFrames + " 帧 (仅统计" + targetMinutes + "分钟内)");
+        System.out.println("平均帧率 (FPS): " + String.format("%.2f", totalFrames / targetSeconds) + " 帧/秒");
+        System.out.println("每分钟渲染帧数: " + String.format("%.0f", totalFrames / (double)targetMinutes) + " 帧/分钟");
         System.out.println("----------------------------------------");
         System.out.println("任务吞吐量: " + String.format("%.2f", successTasks.get() / totalMinutes) + " 任务/分钟");
         if (successTasks.get() > 0) {
