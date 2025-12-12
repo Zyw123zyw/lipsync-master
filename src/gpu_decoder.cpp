@@ -77,8 +77,8 @@ bool GPUDecoder::open(const std::string& video_path, int num_threads, int target
         frame_count_ = static_cast<int>(duration_sec * fps_);
     }
     
-    DBG_LOGI("GPUDecoder: Video info - %dx%d, %d fps, %d frames, %ld kbps\n", 
-             width_, height_, fps_, frame_count_, bitrate_);
+    DBG_LOGI("GPUDecoder[%p]: Video info - %dx%d, %d fps, %d frames, %ld kbps\n", 
+             this, width_, height_, fps_, frame_count_, bitrate_);
     
     // 4. 查找NVDEC解码器
     const AVCodec* decoder = nullptr;
@@ -113,7 +113,7 @@ bool GPUDecoder::open(const std::string& video_path, int num_threads, int target
         return false;
     }
     
-    DBG_LOGI("GPUDecoder: Using decoder: %s\n", decoder->name);
+    DBG_LOGI("GPUDecoder[%p]: Using decoder: %s\n", this, decoder->name);
     
     // 5. 创建解码器上下文
     codec_ctx_ = avcodec_alloc_context3(decoder);
@@ -159,7 +159,7 @@ bool GPUDecoder::open(const std::string& video_path, int num_threads, int target
         gpu_frame_pool_[i].create(height_, width_, CV_8UC3);
     }
     
-    DBG_LOGI("GPUDecoder: Initialized %d GPU frame buffers\n", num_threads);
+    DBG_LOGI("GPUDecoder[%p]: Initialized %d GPU frame buffers\n", this, num_threads);
     
     is_opened_ = true;
     current_frame_ = -1;
@@ -177,7 +177,7 @@ bool GPUDecoder::initHWContext() {
     
     codec_ctx_->hw_device_ctx = av_buffer_ref(hw_device_ctx_);
     
-    DBG_LOGI("GPUDecoder: CUDA hardware context initialized\n");
+    DBG_LOGI("GPUDecoder[%p]: CUDA hardware context initialized, hw_device_ctx=%p\n", this, hw_device_ctx_);
     return true;
 }
 
@@ -270,25 +270,43 @@ bool GPUDecoder::decodeOneFrame(int target_frame) {
     
     // 如果需要seek
     if (target_frame < current_frame_ || target_frame > current_frame_ + 30) {
-        DBG_LOGI("GPUDecoder: SEEK triggered! target=%d current=%d\n", target_frame, current_frame_);
+        DBG_LOGI("GPUDecoder[%p]: SEEK triggered! target=%d current=%d gap=%d frame_count=%d\n", 
+                 this, target_frame, current_frame_, target_frame - current_frame_, frame_count_);
         seekToFrame(target_frame);
         current_frame_ = -1;
     }
     
     int frames_decoded = 0;
+    int read_errors = 0;
+    int send_errors = 0;
+    int receive_errors = 0;
     
     // 解码直到目标帧
     while (true) {
         int ret = av_read_frame(fmt_ctx_, packet_);
         if (ret < 0) {
+            char errbuf[256];
+            av_strerror(ret, errbuf, sizeof(errbuf));
+            
             if (ret == AVERROR_EOF) {
-                // 到达文件末尾，直接返回false，让调用方复用上一帧
-                // 不要seek到开头，因为那样会很慢
-                DBG_LOGW("GPUDecoder: EOF reached at frame %d (target=%d), will reuse last frame\n", 
-                         current_frame_, target_frame);
+                // 到达文件末尾
+                DBG_LOGW("GPUDecoder[%p]: EOF reached! current_frame=%d, target=%d, frame_count=%d, "
+                         "frames_decoded_this_call=%d, read_errors=%d, send_errors=%d, receive_errors=%d\n", 
+                         this, current_frame_, target_frame, frame_count_,
+                         frames_decoded, read_errors, send_errors, receive_errors);
                 return false;
             }
-            return false;
+            
+            read_errors++;
+            DBG_LOGE("GPUDecoder[%p]: av_read_frame failed: %s (code=%d), current_frame=%d, target=%d, read_errors=%d\n",
+                     this, errbuf, ret, current_frame_, target_frame, read_errors);
+            
+            // 如果连续读取错误太多，放弃
+            if (read_errors > 10) {
+                DBG_LOGE("GPUDecoder[%p]: Too many read errors, giving up\n", this);
+                return false;
+            }
+            continue;
         }
         
         if (packet_->stream_index != video_stream_idx_) {
@@ -300,6 +318,16 @@ bool GPUDecoder::decodeOneFrame(int target_frame) {
         av_packet_unref(packet_);
         
         if (ret < 0) {
+            char errbuf[256];
+            av_strerror(ret, errbuf, sizeof(errbuf));
+            send_errors++;
+            DBG_LOGW("GPUDecoder[%p]: avcodec_send_packet failed: %s (code=%d), send_errors=%d\n",
+                     this, errbuf, ret, send_errors);
+            
+            if (send_errors > 10) {
+                DBG_LOGE("GPUDecoder[%p]: Too many send errors, giving up\n", this);
+                return false;
+            }
             continue;
         }
         
@@ -307,15 +335,30 @@ bool GPUDecoder::decodeOneFrame(int target_frame) {
         if (ret == AVERROR(EAGAIN)) {
             continue;
         } else if (ret < 0) {
-            return false;
+            char errbuf[256];
+            av_strerror(ret, errbuf, sizeof(errbuf));
+            receive_errors++;
+            DBG_LOGE("GPUDecoder[%p]: avcodec_receive_frame failed: %s (code=%d), current_frame=%d, receive_errors=%d\n",
+                     this, errbuf, ret, current_frame_, receive_errors);
+            
+            if (receive_errors > 10) {
+                DBG_LOGE("GPUDecoder[%p]: Too many receive errors, giving up\n", this);
+                return false;
+            }
+            continue;
         }
+        
+        // 重置错误计数
+        read_errors = 0;
+        send_errors = 0;
+        receive_errors = 0;
         
         current_frame_++;
         frames_decoded++;
         
         if (current_frame_ >= target_frame) {
             if (frames_decoded > 1) {
-                DBG_LOGI("GPUDecoder: decoded %d frames to reach target %d\n", frames_decoded, target_frame);
+                DBG_LOGI("GPUDecoder[%p]: decoded %d frames to reach target %d\n", this, frames_decoded, target_frame);
             }
             return true;
         }
