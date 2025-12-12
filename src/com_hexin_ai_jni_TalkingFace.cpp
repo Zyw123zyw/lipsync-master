@@ -20,9 +20,11 @@ JNIEXPORT void JNICALL Java_com_hexin_ai_jni_TalkingFace_sayHello(JNIEnv *env, j
 // 创建实例
 JNIEXPORT jlong JNICALL Java_com_hexin_ai_jni_TalkingFace_nativeCreate(JNIEnv *env, jobject obj)
 {
+    DBG_LOGI("nativeCreate called\n");
     TalkingFace* instance = new TalkingFace();
-    DBG_LOGI("TalkingFace instance created: %p (id=%d)\n", instance, instance->getInstanceId());
-    return reinterpret_cast<jlong>(instance);
+    jlong handle = reinterpret_cast<jlong>(instance);
+    DBG_LOGI("TalkingFace instance created: %p (id=%d), handle=%ld\n", instance, instance->getInstanceId(), (long)handle);
+    return handle;
 }
 
 // 销毁实例

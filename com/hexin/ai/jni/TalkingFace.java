@@ -8,7 +8,9 @@ public class TalkingFace {
 
     // 构造函数 - 创建C++实例
     public TalkingFace() {
+        System.out.println("[Java] Calling nativeCreate...");
         nativeHandle = nativeCreate();
+        System.out.println("[Java] nativeCreate returned: " + nativeHandle);
     }
 
     // 销毁实例
@@ -44,6 +46,7 @@ public class TalkingFace {
 
     // 包装方法 - 对外接口保持不变
     public boolean init(int gpuId, int numWorkers, int ffmpegThreads, String modelDir) {
+        System.out.println("[Java] init called with handle: " + nativeHandle);
         return init(nativeHandle, gpuId, numWorkers, ffmpegThreads, modelDir);
     }
 
