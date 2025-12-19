@@ -72,6 +72,36 @@ public:
     int getFPS() const { return fps_; }
     int getFrameCount() const { return frame_count_; }
     long getBitrate() const { return bitrate_; }
+    
+    /**
+     * 获取原始视频fps
+     */
+    int getOriginalFPS() const { return original_fps_; }
+    
+    /**
+     * 获取目标fps
+     */
+    int getTargetFPS() const { return target_fps_; }
+    
+    /**
+     * 获取目标帧率下的帧数（重采样后的帧数）
+     * 计算公式: 视频时长 * 目标fps
+     */
+    int getTargetFrameCount() const {
+        if (original_fps_ <= 0) return frame_count_;
+        double duration = (double)frame_count_ / (double)original_fps_;
+        return (int)(duration * target_fps_);
+    }
+    
+    /**
+     * 获取fps比例（用于帧索引映射）
+     * 返回 original_fps / target_fps
+     */
+    float getFPSRatio() const {
+        if (target_fps_ <= 0 || target_fps_ == original_fps_) 
+            return 1.0f;
+        return (float)original_fps_ / (float)target_fps_;
+    }
 
     /**
      * 检查是否已打开
@@ -107,7 +137,9 @@ private:
     int width_ = 0;
     int height_ = 0;
     int fps_ = 25;
-    int frame_count_ = 0;
+    int original_fps_ = 25;   // 原始视频fps
+    int target_fps_ = 25;     // 目标fps
+    int frame_count_ = 0;     // 原始帧数
     long bitrate_ = 0;
     
     // GPU帧缓存池 (每个线程一个槽位)
@@ -118,6 +150,7 @@ private:
     
     // 状态
     bool is_opened_ = false;
+    bool is_draining_ = false;  // 是否已进入drain模式（发送了flush包）
     
     // 线程安全
     std::mutex decode_mutex_;

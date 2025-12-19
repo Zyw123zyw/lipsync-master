@@ -56,29 +56,36 @@ bool GPUDecoder::open(const std::string& video_path, int num_threads, int target
     height_ = codecpar->height;
     bitrate_ = fmt_ctx_->bit_rate / 1024; // 转为kbps
     
-    // 计算帧率
+    // 计算原始帧率
     if (video_stream->avg_frame_rate.den > 0) {
-        fps_ = video_stream->avg_frame_rate.num / video_stream->avg_frame_rate.den;
+        original_fps_ = video_stream->avg_frame_rate.num / video_stream->avg_frame_rate.den;
     } else if (video_stream->r_frame_rate.den > 0) {
-        fps_ = video_stream->r_frame_rate.num / video_stream->r_frame_rate.den;
-    }
-    if (target_fps > 0) {
-        fps_ = target_fps;
+        original_fps_ = video_stream->r_frame_rate.num / video_stream->r_frame_rate.den;
     }
     
-    // 计算总帧数
+    // 设置目标帧率
+    if (target_fps > 0) {
+        target_fps_ = target_fps;
+    } else {
+        target_fps_ = original_fps_;  // 默认保持原fps
+    }
+    
+    // fps_用于输出和seek计算，设为目标fps
+    fps_ = target_fps_;
+    
+    // 计算原始总帧数（注意：必须用original_fps_，因为frame_count_是原始帧数）
     if (video_stream->nb_frames > 0) {
         frame_count_ = video_stream->nb_frames;
     } else if (video_stream->duration > 0) {
         double duration_sec = video_stream->duration * av_q2d(video_stream->time_base);
-        frame_count_ = static_cast<int>(duration_sec * fps_);
+        frame_count_ = static_cast<int>(duration_sec * original_fps_);
     } else if (fmt_ctx_->duration > 0) {
         double duration_sec = fmt_ctx_->duration / (double)AV_TIME_BASE;
-        frame_count_ = static_cast<int>(duration_sec * fps_);
+        frame_count_ = static_cast<int>(duration_sec * original_fps_);
     }
     
-    DBG_LOGI("GPUDecoder: Video info - %dx%d, %d fps, %d frames, %ld kbps\n", 
-             width_, height_, fps_, frame_count_, bitrate_);
+    DBG_LOGI("GPUDecoder: Video info - %dx%d, original_fps=%d, target_fps=%d, frames=%d, target_frames=%d, %ld kbps\n", 
+             width_, height_, original_fps_, target_fps_, frame_count_, getTargetFrameCount(), bitrate_);
     
     // 4. 查找NVDEC解码器
     const AVCodec* decoder = nullptr;
@@ -226,6 +233,7 @@ void GPUDecoder::close() {
     gpu_frame_pool_.clear();
     
     is_opened_ = false;
+    is_draining_ = false;
     current_frame_ = -1;
     video_stream_idx_ = -1;
 }
@@ -237,9 +245,9 @@ bool GPUDecoder::seekToFrame(int frame_idx) {
     
     AVStream* video_stream = fmt_ctx_->streams[video_stream_idx_];
     
-    // 计算目标时间戳
+    // 计算目标时间戳（使用原始fps，因为frame_idx是原始帧索引）
     int64_t target_ts = av_rescale_q(frame_idx, 
-                                      AVRational{1, fps_}, 
+                                      AVRational{1, original_fps_}, 
                                       video_stream->time_base);
     
     // seek到目标位置（向前seek到关键帧）
@@ -249,8 +257,9 @@ bool GPUDecoder::seekToFrame(int frame_idx) {
         return false;
     }
     
-    // 清空解码器缓冲
+    // 清空解码器缓冲，重置drain状态
     avcodec_flush_buffers(codec_ctx_);
+    is_draining_ = false;
     
     return true;
 }
@@ -261,32 +270,86 @@ bool GPUDecoder::decodeOneFrame(int target_frame) {
     }
     
     // 保护：目标帧不能超过有效范围
-    if (target_frame >= frame_count_ - 5) {
+    if (target_frame >= frame_count_ ) {
         DBG_LOGW("GPUDecoder: target_frame %d too close to end (frame_count=%d), clamping\n", 
                  target_frame, frame_count_);
-        target_frame = frame_count_ - 6;
+        target_frame = frame_count_ - 1;
         if (target_frame < 0) target_frame = 0;
     }
     
-    // 如果需要seek
-    if (target_frame < current_frame_ || target_frame > current_frame_ + 30) {
-        DBG_LOGI("GPUDecoder: SEEK triggered! target=%d current=%d\n", target_frame, current_frame_);
+    // 判断是否需要跳过或SEEK
+    if (current_frame_ >= 0 && target_frame <= current_frame_) {
+        int gap = current_frame_ - target_frame;
+        // fps_ratio < 1 时，相邻帧映射到同一个 actual_decode_idx，gap 最多为1-2
+        // 如果 gap > 2，很可能是视频循环（即使视频只有几帧）
+        if (gap <= 5) {
+            // fps_ratio < 1 导致的重复请求，跳过解码
+            // DBG_LOGI("GPUDecoder: skip decode, target=%d <= current=%d (gap=%d)\n", target_frame, current_frame_, gap);
+            return false;  // 跳过，复用已有帧
+        } else {
+            // 视频循环：需要 SEEK 回去
+            DBG_LOGI("GPUDecoder: SEEK backward (loop)! target=%d current=%d\n", target_frame, current_frame_);
+            seekToFrame(target_frame);
+            current_frame_ = -1;
+        }
+    } else if (target_frame > current_frame_ + 30) {
+        // 向前跳跃太大，需要 SEEK
+        DBG_LOGI("GPUDecoder: SEEK forward! target=%d current=%d\n", target_frame, current_frame_);
         seekToFrame(target_frame);
         current_frame_ = -1;
     }
     
     int frames_decoded = 0;
     
-    // 解码直到目标帧
+    // 如果已经在drain模式，直接从缓冲区获取帧
+    if (is_draining_) {
+        while (true) {
+            int ret = avcodec_receive_frame(codec_ctx_, hw_frame_);
+            if (ret == AVERROR_EOF || ret < 0) {
+                // 缓冲区也空了，真正没有更多帧了
+                DBG_LOGW("GPUDecoder: EOF (drain exhausted) at frame %d (target=%d), will reuse last frame\n", 
+                         current_frame_, target_frame);
+                return false;
+            }
+            
+            current_frame_++;
+            frames_decoded++;
+            
+            if (current_frame_ >= target_frame) {
+                return true;
+            }
+            av_frame_unref(hw_frame_);
+        }
+    }
+    
+    // 正常解码模式：解码直到目标帧
     while (true) {
         int ret = av_read_frame(fmt_ctx_, packet_);
         if (ret < 0) {
             if (ret == AVERROR_EOF) {
-                // 到达文件末尾，直接返回false，让调用方复用上一帧
-                // 不要seek到开头，因为那样会很慢
-                DBG_LOGW("GPUDecoder: EOF reached at frame %d (target=%d), will reuse last frame\n", 
-                         current_frame_, target_frame);
-                return false;
+                // 文件读完了，但解码器缓冲区里可能还有帧（B帧延迟）
+                // 发送空包来刷新解码器，进入drain模式
+                avcodec_send_packet(codec_ctx_, nullptr);
+                is_draining_ = true;
+                
+                // 尝试从缓冲区获取剩余帧
+                while (true) {
+                    ret = avcodec_receive_frame(codec_ctx_, hw_frame_);
+                    if (ret == AVERROR_EOF || ret < 0) {
+                        // 缓冲区也空了，真正没有更多帧了
+                        DBG_LOGW("GPUDecoder: EOF reached at frame %d (target=%d), will reuse last frame\n", 
+                                 current_frame_, target_frame);
+                        return false;
+                    }
+                    
+                    current_frame_++;
+                    frames_decoded++;
+                    
+                    if (current_frame_ >= target_frame) {
+                        return true;
+                    }
+                    av_frame_unref(hw_frame_);
+                }
             }
             return false;
         }
@@ -314,9 +377,9 @@ bool GPUDecoder::decodeOneFrame(int target_frame) {
         frames_decoded++;
         
         if (current_frame_ >= target_frame) {
-            if (frames_decoded > 1) {
-                DBG_LOGI("GPUDecoder: decoded %d frames to reach target %d\n", frames_decoded, target_frame);
-            }
+            // if (frames_decoded > 1) {
+            //     DBG_LOGI("GPUDecoder: decoded %d frames to reach target %d\n", frames_decoded, target_frame);
+            // }
             return true;
         }
         
@@ -418,7 +481,7 @@ cv::cuda::GpuMat& GPUDecoder::decodeFrame(int frame_idx, int thread_id) {
     // 解码帧
     double t_decode_start = (double)cv::getTickCount();
     if (!decodeOneFrame(actual_frame)) {
-        DBG_LOGE("GPUDecoder: Failed to decode frame %d\n", actual_frame);
+        // 跳过解码或EOF时，复用已有帧（不是错误）
         return gpu_frame_pool_[thread_id];
     }
     double t_decode_end = (double)cv::getTickCount();
@@ -433,12 +496,12 @@ cv::cuda::GpuMat& GPUDecoder::decodeFrame(int frame_idx, int thread_id) {
     double t_end = (double)cv::getTickCount();
     double freq = cv::getTickFrequency();
     
-    DBG_LOGI("GPUDecoder::decodeFrame[%d] frame=%d actual=%d | wait_lock=%.1fms decode=%.1fms convert=%.1fms total=%.1fms\n",
-             thread_id, frame_idx, actual_frame,
-             (t_lock - t_start) * 1000 / freq,
-             (t_decode_end - t_decode_start) * 1000 / freq,
-             (t_convert_end - t_convert_start) * 1000 / freq,
-             (t_end - t_start) * 1000 / freq);
+    // DBG_LOGI("GPUDecoder::decodeFrame[%d] frame=%d actual=%d | wait_lock=%.1fms decode=%.1fms convert=%.1fms total=%.1fms\n",
+    //          thread_id, frame_idx, actual_frame,
+    //          (t_lock - t_start) * 1000 / freq,
+    //          (t_decode_end - t_decode_start) * 1000 / freq,
+    //          (t_convert_end - t_convert_start) * 1000 / freq,
+    //          (t_end - t_start) * 1000 / freq);
     
     return gpu_frame_pool_[thread_id];
 }

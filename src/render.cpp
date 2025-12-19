@@ -1,5 +1,27 @@
 #include "talkingface.h"
+#include "video_palindrome.h"
 
+// RAII 辅助类：确保临时文件在函数退出时被清理
+class TempFileCleanup {
+public:
+    TempFileCleanup(const std::string& path, bool enabled) 
+        : path_(path), enabled_(enabled) {}
+    
+    ~TempFileCleanup() {
+        if (enabled_ && !path_.empty()) {
+            if (remove(path_.c_str()) == 0) {
+                DBG_LOGI("已清理临时正反拼接视频: %s\n", path_.c_str());
+            }
+        }
+    }
+    
+    // 禁用清理（如果需要保留文件）
+    void disable() { enabled_ = false; }
+    
+private:
+    std::string path_;
+    bool enabled_;
+};
 
 Status TalkingFace::render(const char *src_video_path, 
                            const char *audio_path, 
@@ -16,12 +38,29 @@ Status TalkingFace::render(const char *src_video_path,
     std::string dir_command = "mkdir -p " + (std::string)tmp_frame_dir;
     system(dir_command.c_str());
 
+    // ========== 视频正反拼接预处理 ==========
+    // 当视频时长小于音频时长时，自动进行正反拼接延长视频
+    long palindrome_cost_ms = 0;
+    std::string actual_video_path = ensurePalindromeVideo(
+        src_video_path, 
+        audio_path, 
+        "",  // 自动生成输出路径
+        &palindrome_cost_ms
+    );
+    
+    // 使用处理后的视频路径（如果进行了拼接则是新路径，否则是原路径）
+    const char* video_path_to_use = actual_video_path.c_str();
+    
+    // RAII 对象：确保临时 palindrome 视频在函数退出时（包括异常/早期返回）被清理
+    bool need_cleanup_palindrome = (actual_video_path != std::string(src_video_path));
+    TempFileCleanup palindrome_cleanup(actual_video_path, need_cleanup_palindrome);
+
     // 获取传参
     this->readVideoParam(set_params);
 
     // 获取音频时长
     this->readAudioInfo(audio_path);
-
+ 
     // 读取底板视频 - 使用GPU解码器
     DBG_LOGI("read video start (GPU decoder).\n");
     double t0 = (double)cv::getTickCount();
@@ -29,7 +68,7 @@ Status TalkingFace::render(const char *src_video_path,
     // 先获取视频基本信息
     int frame_width, frame_height, fps;
     long bitrate;
-    Status video_info_status = this->readVideoInfo(src_video_path, frame_width, frame_height, fps, bitrate);
+    Status video_info_status = this->readVideoInfo(video_path_to_use, frame_width, frame_height, fps, bitrate);
     if (!video_info_status.IsOk())
         return video_info_status;
     
@@ -61,22 +100,23 @@ Status TalkingFace::render(const char *src_video_path,
     
     // 初始化GPU解码器
     gpu_decoder_ = new GPUDecoder();
-    if (!gpu_decoder_->open(src_video_path, n_threads, infos.fps)) {
+    if (!gpu_decoder_->open(video_path_to_use, n_threads, infos.fps)) {
         DBG_LOGE("GPU decoder open failed.\n");
         delete gpu_decoder_;
         gpu_decoder_ = nullptr;
         return Status(Status::Code::VIDEO_READ_FAIL, "GPU decoder open failed.");
     }
     
-    // 减5帧避免访问到末尾可能的空帧
-    infos.frame_nums = gpu_decoder_->getFrameCount() - 5;
+    // 使用目标帧率下的帧数（重采样后的帧数），减5帧避免访问到末尾可能的空帧
+    infos.frame_nums = gpu_decoder_->getTargetFrameCount() ;
     if (infos.frame_nums < 1) {
         infos.frame_nums = 1;
         DBG_LOGW("Video too short, frame_nums clamped to 1\n");
     }
     
     double t1 = ((double)cv::getTickCount() - t0) / cv::getTickFrequency();
-    DBG_LOGI("read video finish (GPU decoder) cost time: %.2fs, frames: %d.\n", t1, infos.frame_nums);
+    DBG_LOGI("read video finish (GPU decoder) cost time: %.2fs, target_frames: %d, fps_ratio: %.2f.\n", 
+             t1, infos.frame_nums, gpu_decoder_->getFPSRatio());
 
     // 单人特例：读取遮挡判断和说话人判断的json文件
     bool json_ret = this->readJsonFile(json_save_path);
@@ -173,6 +213,8 @@ Status TalkingFace::render(const char *src_video_path,
         delete gpu_decoder_;
         gpu_decoder_ = nullptr;
     }
+    
+    // palindrome 临时文件由 RAII 对象 palindrome_cleanup 自动清理
     
     if (!dubbing_status.IsOk())
         return dubbing_status;

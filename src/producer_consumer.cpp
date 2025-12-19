@@ -19,11 +19,19 @@ void TalkingFace::renderProducer(int work_idx)
             break;
 
         // 简单循环播放（不再乒乓来回）
+        // diban_idx是目标帧率下的帧索引
         diban_idx = render_idx % infos.frame_nums;
 
-        // 使用GPU解码器获取帧
+        // 计算实际需要解码的帧索引（原始帧率下的索引）
+        // fps_ratio = original_fps / target_fps
+        // 例如：原始30fps，目标25fps，fps_ratio=1.2
+        // 目标帧0对应原始帧0，目标帧25对应原始帧30
+        float fps_ratio = gpu_decoder_->getFPSRatio();
+        int actual_decode_idx = (int)(diban_idx * fps_ratio);
+
+        // 使用GPU解码器获取帧（传入实际解码索引）
         double t_gpu_start = (double)cv::getTickCount();
-        cv::cuda::GpuMat& gpu_frame = gpu_decoder_->decodeFrame(diban_idx, work_idx);
+        cv::cuda::GpuMat& gpu_frame = gpu_decoder_->decodeFrame(actual_decode_idx, work_idx);
         double t_gpu_decode = (double)cv::getTickCount();
         
         // GPU缩放（如果需要）
@@ -42,11 +50,11 @@ void TalkingFace::renderProducer(int work_idx)
         double t_download = (double)cv::getTickCount();
         double freq = cv::getTickFrequency();
         
-        DBG_LOGI("Producer[%d] render_idx=%d diban_idx=%d | gpu_decode=%.1fms gpu_resize=%.1fms download=%.1fms\n",
-                 work_idx, render_idx, diban_idx,
-                 (t_gpu_decode - t_gpu_start) * 1000 / freq,
-                 (t_gpu_resize - t_gpu_decode) * 1000 / freq,
-                 (t_download - t_gpu_resize) * 1000 / freq);
+//        DBG_LOGI("Producer[%d] render_idx=%d diban_idx=%d | gpu_decode=%.1fms gpu_resize=%.1fms download=%.1fms\n",
+//                 work_idx, render_idx, diban_idx,
+//                 (t_gpu_decode - t_gpu_start) * 1000 / freq,
+//                 (t_gpu_resize - t_gpu_decode) * 1000 / freq,
+//                 (t_download - t_gpu_resize) * 1000 / freq);
 
         // cv::Mat frame_src = frame.clone();
 
