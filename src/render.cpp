@@ -1,28 +1,6 @@
 #include "talkingface.h"
 #include "video_palindrome.h"
 
-// RAII 辅助类：确保临时文件在函数退出时被清理
-class TempFileCleanup {
-public:
-    TempFileCleanup(const std::string& path, bool enabled) 
-        : path_(path), enabled_(enabled) {}
-    
-    ~TempFileCleanup() {
-        if (enabled_ && !path_.empty()) {
-            if (remove(path_.c_str()) == 0) {
-                DBG_LOGI("已清理临时正反拼接视频: %s\n", path_.c_str());
-            }
-        }
-    }
-    
-    // 禁用清理（如果需要保留文件）
-    void disable() { enabled_ = false; }
-    
-private:
-    std::string path_;
-    bool enabled_;
-};
-
 Status TalkingFace::render(const char *src_video_path, 
                            const char *audio_path, 
                            const char *json_save_path, 
@@ -38,23 +16,6 @@ Status TalkingFace::render(const char *src_video_path,
     std::string dir_command = "mkdir -p " + (std::string)tmp_frame_dir;
     system(dir_command.c_str());
 
-    // ========== 视频正反拼接预处理 ==========
-    // 当视频时长小于音频时长时，自动进行正反拼接延长视频
-    long palindrome_cost_ms = 0;
-    std::string actual_video_path = ensurePalindromeVideo(
-        src_video_path, 
-        audio_path, 
-        "",  // 自动生成输出路径
-        &palindrome_cost_ms
-    );
-    
-    // 使用处理后的视频路径（如果进行了拼接则是新路径，否则是原路径）
-    const char* video_path_to_use = actual_video_path.c_str();
-    
-    // RAII 对象：确保临时 palindrome 视频在函数退出时（包括异常/早期返回）被清理
-    bool need_cleanup_palindrome = (actual_video_path != std::string(src_video_path));
-    TempFileCleanup palindrome_cleanup(actual_video_path, need_cleanup_palindrome);
-
     // 获取传参
     this->readVideoParam(set_params);
 
@@ -65,10 +26,10 @@ Status TalkingFace::render(const char *src_video_path,
     DBG_LOGI("read video start (GPU decoder).\n");
     double t0 = (double)cv::getTickCount();
     
-    // 先获取视频基本信息
+    // 先获取视频基本信息（使用原视频路径）
     int frame_width, frame_height, fps;
     long bitrate;
-    Status video_info_status = this->readVideoInfo(video_path_to_use, frame_width, frame_height, fps, bitrate);
+    Status video_info_status = this->readVideoInfo(src_video_path, frame_width, frame_height, fps, bitrate);
     if (!video_info_status.IsOk())
         return video_info_status;
     
@@ -98,17 +59,35 @@ Status TalkingFace::render(const char *src_video_path,
     if (infos.fps > 60) infos.fps = 60;
     infos.bitrate = bitrate;
     
-    // 初始化GPU解码器
+    // ========== 异步视频反转（并行优化） ==========
+    // 获取音视频时长，判断是否需要反转
+    double video_duration = probeMediaDuration(src_video_path, "v:0");
+    double audio_duration = probeMediaDuration(audio_path, "a:0");
+    
+    // 创建异步反转器并启动后台线程
+    async_reverser_ = new AsyncVideoReverser();
+    std::string reversed_video_path = generateReversedVideoPath(src_video_path);
+    async_reverser_->startAsync(src_video_path, reversed_video_path, video_duration, audio_duration);
+    
+    // 初始化GPU解码器（使用原视频）
     gpu_decoder_ = new GPUDecoder();
-    if (!gpu_decoder_->open(video_path_to_use, n_threads, infos.fps)) {
+    if (!gpu_decoder_->open(src_video_path, n_threads, infos.fps)) {
         DBG_LOGE("GPU decoder open failed.\n");
         delete gpu_decoder_;
         gpu_decoder_ = nullptr;
+        // 清理异步反转器
+        if (async_reverser_) {
+            async_reverser_->join();
+            async_reverser_->cleanup();
+            delete async_reverser_;
+            async_reverser_ = nullptr;
+        }
         return Status(Status::Code::VIDEO_READ_FAIL, "GPU decoder open failed.");
     }
     
-    // 使用目标帧率下的帧数（重采样后的帧数），减5帧避免访问到末尾可能的空帧
-    infos.frame_nums = gpu_decoder_->getTargetFrameCount() ;
+    // 使用目标帧率下的帧数（重采样后的帧数）
+    infos.frame_nums = gpu_decoder_->getTargetFrameCount();
+    
     if (infos.frame_nums < 1) {
         infos.frame_nums = 1;
         DBG_LOGW("Video too short, frame_nums clamped to 1\n");
@@ -133,14 +112,22 @@ Status TalkingFace::render(const char *src_video_path,
         if (access(vocal_audio_path, F_OK) == -1)
         {
             Status audio_status = this->extractAudioFeat(audio_path);
-            if (!audio_status.IsOk())
+            if (!audio_status.IsOk()) {
+                // 清理资源后返回
+                if (gpu_decoder_) { gpu_decoder_->close(); delete gpu_decoder_; gpu_decoder_ = nullptr; }
+                if (async_reverser_) { async_reverser_->join(); async_reverser_->cleanup(); delete async_reverser_; async_reverser_ = nullptr; }
                 return audio_status;
+            }
         }
         else
         {
             Status audio_status = this->extractAudioFeat(vocal_audio_path);
-            if (!audio_status.IsOk())
+            if (!audio_status.IsOk()) {
+                // 清理资源后返回
+                if (gpu_decoder_) { gpu_decoder_->close(); delete gpu_decoder_; gpu_decoder_ = nullptr; }
+                if (async_reverser_) { async_reverser_->join(); async_reverser_->cleanup(); delete async_reverser_; async_reverser_ = nullptr; }
                 return audio_status;
+            }
         }
         infos.min_audio_cnt = infos.audio_cnts[0];
     }
@@ -165,13 +152,25 @@ Status TalkingFace::render(const char *src_video_path,
         }
         else
             id_status = this->ProcessIDParam(id_params);
-        if (!id_status.IsOk())
+        if (!id_status.IsOk()) {
+            // 清理资源后返回
+            if (gpu_decoder_) { gpu_decoder_->close(); delete gpu_decoder_; gpu_decoder_ = nullptr; }
+            if (async_reverser_) { async_reverser_->join(); async_reverser_->cleanup(); delete async_reverser_; async_reverser_ = nullptr; }
             return id_status;
+        }
     }
 
     // 校验音频特征长度
-    if (infos.min_audio_cnt < 1)
+    if (infos.min_audio_cnt < 1) {
+        // 清理资源后返回
+        if (gpu_decoder_) { gpu_decoder_->close(); delete gpu_decoder_; gpu_decoder_ = nullptr; }
+        if (async_reverser_) { async_reverser_->join(); async_reverser_->cleanup(); delete async_reverser_; async_reverser_ = nullptr; }
         return Status(Status::Code::AUDIO_FEAT_EXTRACT_FAIL, "audio feat length error.");
+    }
+
+    // 初始化GPU resize缓冲区（每个线程一个）
+    gpu_resize_buffers_.resize(n_threads);
+    DBG_LOGI("已初始化 %d 个GPU resize缓冲区\n", n_threads);
 
     // 开启渲染线程
     std::vector<std::thread> render_threads;
@@ -194,6 +193,9 @@ Status TalkingFace::render(const char *src_video_path,
         if (!cap.isOpened())
         {
             DBG_LOGE("tmp video check fail.\n");
+            // 清理资源后返回
+            if (gpu_decoder_) { gpu_decoder_->close(); delete gpu_decoder_; gpu_decoder_ = nullptr; }
+            if (async_reverser_) { async_reverser_->join(); async_reverser_->cleanup(); delete async_reverser_; async_reverser_ = nullptr; }
             return Status(Status::Code::AUDIO_DUBBING_FAIL, "tmp video check fail!");
         }
         cap.release();
@@ -201,6 +203,9 @@ Status TalkingFace::render(const char *src_video_path,
     catch(...)
     {
         DBG_LOGE("tmp video check fail.\n");
+        // 清理资源后返回
+        if (gpu_decoder_) { gpu_decoder_->close(); delete gpu_decoder_; gpu_decoder_ = nullptr; }
+        if (async_reverser_) { async_reverser_->join(); async_reverser_->cleanup(); delete async_reverser_; async_reverser_ = nullptr; }
         return Status(Status::Code::AUDIO_DUBBING_FAIL, "tmp video check fail!");
     }
 
@@ -214,7 +219,23 @@ Status TalkingFace::render(const char *src_video_path,
         gpu_decoder_ = nullptr;
     }
     
-    // palindrome 临时文件由 RAII 对象 palindrome_cleanup 自动清理
+    // 清理GPU resize缓冲区
+    for (auto& buffer : gpu_resize_buffers_) {
+        if (!buffer.empty()) {
+            buffer.release();
+        }
+    }
+    gpu_resize_buffers_.clear();
+    DBG_LOGI("已清理GPU resize缓冲区\n");
+    
+    // 清理异步反转器（包括反转视频解码器和临时文件）
+    if (async_reverser_) {
+        async_reverser_->join();
+        async_reverser_->cleanup();
+        delete async_reverser_;
+        async_reverser_ = nullptr;
+        DBG_LOGI("已清理异步反转资源\n");
+    }
     
     if (!dubbing_status.IsOk())
         return dubbing_status;

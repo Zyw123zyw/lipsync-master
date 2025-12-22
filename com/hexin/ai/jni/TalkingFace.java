@@ -40,7 +40,8 @@ public class TalkingFace {
         String audioPath = "/workspace/project/talkingface/audio.wav";
         String faceJsonSavePath = "";
         String saveVideoPath = "/workspace/project/talkingface/out.mp4";
-        String videoParams = "";
+     //   String videoParams = "";
+     	String videoParams = "{\"video_height\": 0, \"video_max_side\": 1440, \"video_enhance\": 1, \"video_width\": 0, \"keep_bitrate\": 1, \"stablized\": 1, \"audio_max_time\": 0, \"keep_fps\": 1}";
         String vocalAudioPath = "";
         String idParams = "";
 

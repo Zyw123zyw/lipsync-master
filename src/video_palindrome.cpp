@@ -1,4 +1,5 @@
 #include "video_palindrome.h"
+#include "gpu_decoder.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -253,7 +254,7 @@ std::string ensurePalindromeVideo(const std::string& src_video_path,
     PAL_INFO("视频时长 %.3fs 音频时长 %.3fs \n", video_duration, audio_duration);
     
     // 判断是否需要正反拼接
-    if (video_duration >= audio_duration - 0.2+10000000000) {
+    if (video_duration >= audio_duration - 0.2) {
         PAL_INFO("视频时长 %.3fs 大于音频时长 %.3fs - 0.2s，直接使用原视频。\n", 
                 video_duration, audio_duration);
         return src_video_path;
@@ -403,4 +404,280 @@ std::string ensurePalindromeVideo(const std::string& src_video_path,
     PAL_INFO("正反拼接耗时: %lld 毫秒 (%.2f 秒)\n", (long long)duration_ms, duration_ms / 1000.0);
     
     return output_video_path;
+}
+
+// ============================================================================
+// AsyncVideoReverser 类实现
+// ============================================================================
+
+AsyncVideoReverser::AsyncVideoReverser() {
+}
+
+AsyncVideoReverser::~AsyncVideoReverser() {
+    join();
+    cleanup();
+}
+
+void AsyncVideoReverser::startAsync(const std::string& src_video_path,
+                                     const std::string& reversed_video_path,
+                                     double video_duration,
+                                     double audio_duration) {
+    src_video_path_ = src_video_path;
+    reversed_video_path_ = reversed_video_path;
+    video_duration_ = video_duration;
+    audio_duration_ = audio_duration;
+    
+    // 判断是否需要反转
+    if (video_duration >= audio_duration - 0.2) {
+        PAL_INFO("[AsyncReverser] 视频时长 %.3fs >= 音频时长 %.3fs - 0.2s，无需反转\n",
+                 video_duration, audio_duration);
+        need_reverse_ = false;
+        is_ready_.store(true);
+        return;
+    }
+    
+    need_reverse_ = true;
+    is_ready_.store(false);
+    is_failed_.store(false);
+    
+    PAL_INFO("[AsyncReverser] 视频时长 %.3fs < 音频时长 %.3fs，启动后台反转线程\n",
+             video_duration, audio_duration);
+    
+    // 启动后台反转线程
+    thread_started_ = true;
+    reverse_thread_ = std::thread(&AsyncVideoReverser::doReverse, this);
+}
+
+void AsyncVideoReverser::doReverse() {
+    PAL_INFO("[AsyncReverser] 后台线程开始反转视频...\n");
+    auto start_time = std::chrono::steady_clock::now();
+    
+    bool success = generateReversedVideo(src_video_path_, reversed_video_path_);
+    
+    auto end_time = std::chrono::steady_clock::now();
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    
+    // 更新状态并通知等待的线程
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        is_failed_.store(!success);
+        is_ready_.store(true);
+    }
+    cv_.notify_all();
+    
+    if (success) {
+        PAL_INFO("[AsyncReverser] 后台反转完成，耗时 %lld ms\n", (long long)duration_ms);
+    } else {
+        PAL_ERR("[AsyncReverser] 后台反转失败，耗时 %lld ms\n", (long long)duration_ms);
+    }
+}
+
+GPUDecoder* AsyncVideoReverser::waitAndGetDecoder(int num_threads, int target_fps) {
+    // ========== 阶段1: 等待反转视频生成完成 ==========
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        
+        if (!is_ready_.load()) {
+            PAL_INFO("[AsyncReverser] 等待反转视频生成完成...\n");
+        }
+        
+        // 条件等待：直到 is_ready_ 变为 true
+        cv_.wait(lock, [this]() {
+            return is_ready_.load();
+        });
+        
+        // 检查是否失败
+        if (is_failed_.load()) {
+            PAL_WARN("[AsyncReverser] 反转视频生成失败，返回nullptr\n");
+            return nullptr;
+        }
+    }
+    
+    // ========== 阶段2: 初始化解码器（只做一次，线程安全） ==========
+    {
+        std::lock_guard<std::mutex> lock(decoder_mutex_);
+        
+        // Double-check: 可能其他线程已经初始化了
+        if (decoder_initialized_) {
+            return reversed_decoder_;
+        }
+        
+        // 第一个到达的线程负责初始化
+        PAL_INFO("[AsyncReverser] 初始化反转视频解码器: %s\n", reversed_video_path_.c_str());
+        
+        reversed_decoder_ = new GPUDecoder();
+        if (!reversed_decoder_->open(reversed_video_path_, num_threads, target_fps)) {
+            PAL_ERR("[AsyncReverser] 打开反转视频解码器失败\n");
+            delete reversed_decoder_;
+            reversed_decoder_ = nullptr;
+            decoder_initialized_ = true;  // 标记为已尝试（虽然失败了）
+            return nullptr;
+        }
+        
+        decoder_initialized_ = true;
+        PAL_INFO("[AsyncReverser] 反转视频解码器初始化成功，帧数: %d\n", 
+                 reversed_decoder_->getFrameCount());
+    }
+    
+    return reversed_decoder_;
+}
+
+void AsyncVideoReverser::cleanup() {
+    // 关闭并删除解码器
+    {
+        std::lock_guard<std::mutex> lock(decoder_mutex_);
+        if (reversed_decoder_ != nullptr) {
+            reversed_decoder_->close();
+            delete reversed_decoder_;
+            reversed_decoder_ = nullptr;
+        }
+        decoder_initialized_ = false;
+    }
+    
+    // 删除临时反转视频文件
+    if (!reversed_video_path_.empty() && fileExists(reversed_video_path_)) {
+        PAL_INFO("[AsyncReverser] 清理临时反转视频: %s\n", reversed_video_path_.c_str());
+        deleteFile(reversed_video_path_);
+    }
+}
+
+void AsyncVideoReverser::join() {
+    if (thread_started_ && reverse_thread_.joinable()) {
+        reverse_thread_.join();
+        thread_started_ = false;
+    }
+}
+
+// ============================================================================
+// 辅助函数实现
+// ============================================================================
+
+std::string generateReversedVideoPath(const std::string& src_video_path) {
+    std::string parent_dir = getParentDir(src_video_path);
+    std::string filename = getFileName(src_video_path);
+    std::string base_name = getBaseName(filename);
+    return parent_dir + "/" + base_name + "_reversed.mp4";
+}
+
+bool generateReversedVideo(const std::string& src_video_path,
+                           const std::string& output_video_path) {
+    PAL_INFO("[generateReversedVideo] 开始生成反转视频: %s -> %s\n",
+             src_video_path.c_str(), output_video_path.c_str());
+    
+    // 检查源视频是否存在
+    if (!fileExists(src_video_path)) {
+        PAL_ERR("[generateReversedVideo] 源视频不存在: %s\n", src_video_path.c_str());
+        return false;
+    }
+    
+    // 获取视频时长
+    double video_duration = probeMediaDuration(src_video_path, "v:0");
+    if (video_duration <= 0) {
+        PAL_ERR("[generateReversedVideo] 无法获取视频时长\n");
+        return false;
+    }
+    
+    std::string ffmpeg_cmd = getFFmpegCmd("ffmpeg");
+    std::string parent_dir = getParentDir(src_video_path);
+    std::string filename = getFileName(src_video_path);
+    std::string base_name = getBaseName(filename);
+    
+    // ========== 分段反转处理 ==========
+    int segment_duration = 30;  // 每段20秒
+    int segment_count = (int)std::ceil(video_duration / segment_duration);
+    
+    PAL_INFO("[generateReversedVideo] 视频时长 %.2fs, 分为 %d 段处理 (每段%ds)\n",
+             video_duration, segment_count, segment_duration);
+    
+    std::vector<std::string> reversed_segments;
+    
+    for (int i = 0; i < segment_count; i++) {
+        double start_time_seg = i * segment_duration;
+        double duration = std::min((double)segment_duration, video_duration - start_time_seg);
+        
+        if (duration <= 1e-3) {
+            PAL_INFO("[generateReversedVideo] 第 %d 段时长 %.4fs, 跳过\n", i + 1, duration);
+            continue;
+        }
+        
+        std::string segment_path = parent_dir + "/" + base_name + "_revseg" + std::to_string(i) + ".mp4";
+        
+        PAL_INFO("[generateReversedVideo] 处理第 %d/%d 段 (%.1fs-%.1fs)...\n",
+                 i + 1, segment_count, start_time_seg, start_time_seg + duration);
+        
+        char start_str[32], duration_str[32];
+        snprintf(start_str, sizeof(start_str), "%.3f", start_time_seg);
+        snprintf(duration_str, sizeof(duration_str), "%.3f", duration);
+        
+        // GPU 编码：使用 h264_nvenc (H.264)，比 hevc_nvenc 编码更快
+        std::string seg_cmd = ffmpeg_cmd + " -y"
+                              " -ss " + std::string(start_str) +
+                              " -t " + std::string(duration_str) +
+                              " -i \"" + src_video_path + "\""
+                              " -vf reverse"
+                              " -c:v h264_nvenc -preset fast -pix_fmt yuv420p"
+                              " -an \"" + segment_path + "\"";
+        
+        PAL_INFO("[generateReversedVideo] 执行命令: %s\n", seg_cmd.c_str());
+        
+        bool seg_success = execCommandWithLog(seg_cmd, "revseg" + std::to_string(i), segment_path);
+        
+        if (!seg_success) {
+            // 清理已生成的片段
+            for (const auto& seg : reversed_segments) {
+                deleteFile(seg);
+            }
+            PAL_ERR("[generateReversedVideo] 分段 %d 反转失败\n", i);
+            return false;
+        }
+        
+        reversed_segments.push_back(segment_path);
+    }
+    
+    PAL_INFO("[generateReversedVideo] 所有分段反转完成, 开始拼接...\n");
+    
+    // ========== 创建拼接列表（倒序拼接形成完整反转视频） ==========
+    std::string concat_list_path = parent_dir + "/" + base_name + "_rev_concat_list.txt";
+    
+    {
+        std::ofstream concat_file(concat_list_path);
+        if (!concat_file.is_open()) {
+            for (const auto& seg : reversed_segments) {
+                deleteFile(seg);
+            }
+            PAL_ERR("[generateReversedVideo] 无法创建拼接列表文件\n");
+            return false;
+        }
+        
+        // 倒序拼接，形成完整的反转视频
+        // 原视频: [seg0][seg1][seg2]
+        // 反转后: [seg2_rev][seg1_rev][seg0_rev]
+        for (int i = (int)reversed_segments.size() - 1; i >= 0; i--) {
+            concat_file << "file '" << reversed_segments[i] << "'" << std::endl;
+        }
+    }
+    
+    // ========== 执行拼接 ==========
+    // 由于分段已经是 H.264 格式，拼接时可以直接 copy，速度更快
+    std::string concat_cmd = ffmpeg_cmd + " -y -f concat -safe 0"
+                             " -i \"" + concat_list_path + "\""
+                             " -c:v copy -an \"" + output_video_path + "\"";
+    
+    PAL_INFO("[generateReversedVideo] 拼接命令: %s\n", concat_cmd.c_str());
+    
+    bool concat_success = execCommandWithLog(concat_cmd, "rev_concat", output_video_path);
+    
+    // ========== 清理临时文件 ==========
+    deleteFile(concat_list_path);
+    for (const auto& seg_path : reversed_segments) {
+        deleteFile(seg_path);
+    }
+    
+    if (!concat_success) {
+        PAL_ERR("[generateReversedVideo] 拼接失败\n");
+        return false;
+    }
+    
+    PAL_INFO("[generateReversedVideo] 反转视频生成完成: %s\n", output_video_path.c_str());
+    return true;
 }
