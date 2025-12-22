@@ -1,10 +1,11 @@
 package com.hexin.ai.jni;
-import java.io.File;
-import java.util.Arrays;
-import java.util.Comparator;
 
-import java.io.IOException;
-
+/**
+ * TalkingFace JNI 接口类
+ * 
+ * 注意：视频正反拼接功能已移至 C++ 层（render 函数入口处自动处理），
+ * Java 端无需再调用 ensurePalindromeVideo 方法。
+ */
 public class TalkingFace {
 
     public native void sayHello();
@@ -20,143 +21,55 @@ public class TalkingFace {
     public native boolean stop();
 
     static {
-        System.load("/mnt/data/vision-devel/zhangyiwei/lipsync-master/build/libtalkingface.so"); // 加载动态链接库 
+        System.load("/workspace/project/talkingface/lipsync-master/build/libtalkingface.so"); // 加载动态链接库 
     }
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) {
+
+        // 记录程序开始时间
+        long startTime = System.currentTimeMillis();
 
         TalkingFace tf = new TalkingFace();
 
         tf.sayHello();
 
-        tf.init(0, 2, 4, "/root/models_8.9/");
-
+        tf.init(0, 2, 4, "/workspace/models_8.9/");
         String msg;
-
-        String src_video_path = "";
-        String audioPath = "";
+        
+        String src_video_path = "/workspace/project/talkingface/in.mp4";
+        String audioPath = "/workspace/project/talkingface/audio.wav";
         String faceJsonSavePath = "";
-        String saveVideoPath = "";
-        String videoParams = "{\"video_enhance\":0}";
+        String saveVideoPath = "/workspace/project/talkingface/out.mp4";
+        String videoParams = "";
+        //String videoParams = "{\"video_height\": 0, \"video_max_side\": 1440, \"video_enhance\": 1, \"video_width\": 0, \"keep_bitrate\": 1, \"stablized\": 1, \"audio_max_time\": 0, \"keep_fps\": 1}";
         String vocalAudioPath = "";
         String idParams = "";
 
-        // videoParams = "{\"video_bitrate\":0,\"video_width\":256,\"video_height\":511,\"video_enhance\":1,\"filter_head_pose\":1,\"face_det_threshold\":0.5}";
-        // videoParams = "{\"video_enhance\":1, \"face_det_threshold\":0.5, \"face_box\":[800,0,960,1080]}";
-        // videoParams = "{\"video_bitrate\":0,\"video_enhance\":1,\"video_height\":1920,\"video_width\":1080}}";
-        // videoParams = "{\"video_enhance\":1, \"amplifier\": 2.0, \"filter_head_pose\": 0, \"face_det_threshold\":0.5, \"face_box\":[0,0,0,0]}";
-        // idParams = "[{\"id\":0,\"box\":[0,0,600,1000],\"face\":\"path1.jpg\",\"audio\":\"/workspace/project/talkingface/test_asserts/multi_person/audio3_id0.wav\"},{\"id\":1,\"box\":[700,0,600,1000],\"face\":\"path2.jpg\",\"audio\":\"/workspace/project/talkingface/test_asserts/multi_person/audio3_id1.wav\"}]";
-        // idParams = "[{\"id\":0,\"box\":[250,200,650,700],\"face\":\"path1.jpg\",\"audio\":\"/workspace/project/talkingface/test_asserts/multi_person/audio2_id0.MP3\"},{\"id\":1,\"box\":[600,200,650,700],\"face\":\"path2.jpg\",\"audio\":\"/workspace/project/talkingface/test_asserts/multi_person/audio2_id1.MP3\"\"},{\"id\": 2,\"box\": [930, 200, 650, 700],\"face\": \"path2.jpg\",\"audio\": \"/workspace/project/talkingface/test_asserts/multi_person/audio2_id2.MP3\"\"},{\"id\":3,\"box\":[1300,200,650,700],\"face\":\"path2.jpg\",\"audio\":\"/workspace/project/talkingface/test_asserts/multi_person/audio2_id3.MP3\"\"}]";
-        // idParams = "[{\"id\":0,\"box\":[150,150,300,550],\"face\":\"path0.jpg\",\"audio\":\"/workspace/project/talkingface/test_asserts/multi_person/audio2_id0.MP3\"},{\"id\":1,\"box\":[430,150,300,550],\"face\":\"path2.jpg\",\"audio\":\"/workspace/project/talkingface/test_asserts/multi_person/audio2_id1.MP3\"},{\"id\": 2,\"box\": [700,150,300,550],\"face\": \"path2.jpg\",\"audio\": \"/workspace/project/talkingface/test_asserts/multi_person/audio2_id2.MP3\"},{\"id\":3,\"box\":[980,150,300,550],\"face\":\"path2.jpg\",\"audio\":\"/workspace/project/talkingface/test_asserts/multi_person/audio2_id3.MP3\"}]";
-        // videoParams = "{\"video_enhance\":1, \"video_bitrate\":0,  \"amplifier\": 1.0, \"video_max_side\": 1440, \"audio_max_time\": 1800}";
-        // videoParams = "{\"video_enhance\":0, \"video_bitrate\":0,  \"amplifier\": 1.0, \"video_max_side\": 0, \"audio_max_time\": 0}";
-        // videoParams = "{\"video_max_side\":-1, \"video_width\":2000, \"video_height\":4000}";
-        // videoParams = "{\"audio_max_time\":20, \"video_enhance\":1}";
-        // videoParams = "{\"video_bitrate\":2000, \"video_enhance\":1}";
-        // videoParams = "{\"video_enhance\":1, \"audio_max_time\":0, \"video_max_side\": 1080}";
-        // videoParams = "{\"video_enhance\":1, \"amplifier\": 1.5, \"shutup_first\": 0}";
-
-        // // test-for-process
-        // src_video_path = "/workspace/project/talkingface/117d07764ae94ffabbfe16aeaf2a3d30.mp4";
-        // faceJsonSavePath = "/workspace/project/talkingface/117d07764ae94ffabbfe16aeaf2a3d30.json";
-        // msg = tf.process(src_video_path, faceJsonSavePath, videoParams);
-        // System.out.println(msg);
-
-        // // // test-for-shutup
-        // String imagePath = "/workspace/project/talkingface/assets/1/image3.png";
-        // String savePath = "/workspace/project/talkingface/out.png";
-        // // idParams = "[{\"box\":[707,43,307,399]}]";
-        // // idParams = "[{\"box\":[70,150,200,200]},{\"box\":[200,200,200,200]}]";
-        // // idParams = "[{\"box\":[60,60,150,150]},{\"box\":[100,60,150,150]},{\"box\":[200,60,150,150]}]";
-        // msg = tf.shutup(imagePath, savePath, videoParams, idParams);
-        // System.out.println(msg);
-
-        // // // test-for-render
-        // videoParams = "{\"video_enhance\":0, \"video_bitrate\":0,  \"amplifier\": 2.0, \"video_max_side\": 0, \"audio_max_time\": 0}";
-        // src_video_path = "/workspace/project/talkingface/assets/多人/双人视频-左1右2.mp4";
-        // audioPath = "/workspace/project/talkingface/assets/多人/说话人.wav";
-        // saveVideoPath = "/workspace/project/talkingface/assets/多人/out.mp4";
-        // idParams = "[{\"id\":0,\"box\":[400,0,600,600],\"audio\":\"/workspace/project/talkingface/assets/多人/说话人1.WAV\"},{\"id\":1,\"box\":[1000,0,600,600],\"audio\":\"/workspace/project/talkingface/assets/多人/说话人2.WAV\"}]";
-        // msg = tf.render(src_video_path, audioPath, faceJsonSavePath, saveVideoPath, videoParams, vocalAudioPath, idParams);
-        // System.out.println(msg);
-        
-
-        // videoParams = "{\"video_enhance\": 0, \"keep_fps\": 1, \"keep_bitrate\": 1}";
-        // src_video_path = "/workspace/project/talkingface/assets/0620/4k_25fps.mp4";
-        // audioPath = "/workspace/project/talkingface/assets/0620/audio_30m.wav";
-        // saveVideoPath = "/workspace/project/talkingface/out.mp4";
-        // msg = tf.render(src_video_path, audioPath, faceJsonSavePath, saveVideoPath, videoParams, vocalAudioPath, idParams);
-        // System.out.println(msg);
-
-        src_video_path = "/mnt/data/vision-devel/zhangyiwei/lipsync-sdk-master/input/bb0087c4ff364deb97cdea8d5e4aaf3b.mp4";
-        // src_video_path = "/workspace/project/talkingface/assets/0620/4k_25fps.mp4";
-        audioPath = "/mnt/data/vision-devel/zhangyiwei/lipsync-sdk-master/input/audio.wav";
-        saveVideoPath = "/mnt/data/vision-devel/zhangyiwei/lipsync-sdk-master/output/out.mp4";
-        msg = tf.render(src_video_path, audioPath, faceJsonSavePath, saveVideoPath, videoParams, vocalAudioPath, idParams);
-        System.out.println(msg);
-
-
-        // // 批量测试
-        // String path = "/workspace/project/talkingface/assets/batch_test";
-        // File file = new File(path);
-        // File[] fs = file.listFiles();
-        // // 按文件名进行排序（不区分大小写）
-        // Arrays.sort(fs, new Comparator<File>() {
-        //     @Override
-        //     public int compare(File file1, File file2) {
-        //         return file1.getName().compareToIgnoreCase(file2.getName());
-        //     }
-        // });
-        // // 遍历合成
-        // for(File f:fs){
-        //     if(!f.isDirectory() && f.getName().toLowerCase().endsWith(".mp4"))
-        //     {
-        //         src_video_path = f.getAbsolutePath();
-        //         // audioPath = src_video_path.replace(".mp4", ".wav").replace("/videos/", "/audios/");
-        //         // saveVideoPath = src_video_path.replace("/videos/", "/outs/");
-        //         audioPath = src_video_path.replace(".mp4", ".wav").replace("diban", "audio");
-        //         saveVideoPath = src_video_path.replace("/diban", "/out_");
-        //         System.out.println(src_video_path);
-        //         System.out.println(audioPath);
-        //         System.out.println(saveVideoPath);
-        //         // System.out.println();
-
-        //         msg = tf.render(src_video_path, audioPath, faceJsonSavePath, saveVideoPath, videoParams, vocalAudioPath, idParams);
-        //         System.out.println(msg);
-        //     }
-        // }
-
-
-        // // 批量测试
-        // String path = "/workspace/project/talkingface/assets/像不像问题/api素材/data";
-        // File file = new File(path);
-        // File[] fs = file.listFiles();
-        // // 按文件名进行排序（不区分大小写）
-        // Arrays.sort(fs, new Comparator<File>() {
-        //     @Override
-        //     public int compare(File file1, File file2) {
-        //         return file1.getName().compareToIgnoreCase(file2.getName());
-        //     }
-        // });
-        // // 遍历合成
-        // for(File f:fs){
-        //     if(!f.isDirectory() && f.getName().toLowerCase().endsWith(".wav"))
-        //     {
-        //         // src_video_path = f.getAbsolutePath();
-        //         audioPath = f.getAbsolutePath();
-        //         src_video_path = audioPath.replace(".wav", ".mp4");
-        //         saveVideoPath = src_video_path.replace(".mp4", "_wav2lip_new.mp4");
-        //         System.out.println(src_video_path);
-        //         System.out.println(audioPath);
-        //         System.out.println(saveVideoPath);
-        //         // System.out.println();
-
-        //         msg = tf.render(src_video_path, audioPath, faceJsonSavePath, saveVideoPath, videoParams, vocalAudioPath, idParams);
-        //         System.out.println(msg);
-        //     }
-        // }
-
+        // 视频正反拼接已在 C++ render 函数入口处自动处理，无需在 Java 端调用
+        for (int i = 1; i <= 1; i++) { // for循环为了测试用的循环，实际使用时应该去掉
+            msg = tf.render(src_video_path, audioPath, faceJsonSavePath, saveVideoPath, videoParams, vocalAudioPath, idParams);
+            System.out.println(msg);
+        }
+    
         tf.stop();
+        
+        // 计算并输出总耗时
+        long endTime = System.currentTimeMillis();
+        long totalTime = endTime - startTime;
+        long seconds = totalTime / 1000;
+        long minutes = seconds / 60;
+        long hours = minutes / 60;
+        
+        System.out.println("========================================");
+        System.out.println("程序执行完成！");
+        System.out.println("总耗时: " + totalTime + " 毫秒");
+        System.out.println("总耗时: " + seconds + " 秒 (" + (minutes % 60) + " 分 " + (seconds % 60) + " 秒)");
+        if (hours > 0) {
+            System.out.println("总耗时: " + hours + " 小时 " + (minutes % 60) + " 分 " + (seconds % 60) + " 秒");
+        }
+        System.out.println("========================================");
     }
 }
+
+
 

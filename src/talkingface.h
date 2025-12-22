@@ -21,6 +21,7 @@
 #include "debug/util_debug.h"
 #include "json/json.h"
 #include "cuda_runtime_api.h"
+#include <opencv2/core/cuda.hpp>
 
 #include "../trt_function/utils.h"
 #include "../trt_function/models.h"
@@ -28,6 +29,7 @@
 #include "../src/audio/wavhelper.h"
 #include "ffmpeg_config.h"
 #include "gpu_decoder.h"
+#include "video_palindrome.h"
 
 using namespace Function;
 using namespace live;
@@ -116,8 +118,12 @@ private:
     
     // GPU视频解码器
     GPUDecoder* gpu_decoder_ = nullptr;
-
-private:
+    
+    // 异步视频反转器（用于并行反转优化）
+    AsyncVideoReverser* async_reverser_ = nullptr;
+    
+    // GPU resize 缓冲区（每个线程一个，避免频繁分配）
+    std::vector<cv::cuda::GpuMat> gpu_resize_buffers_;
 
     void traverseFiles(std::string path, std::vector<std::string> &filenames, const std::string& extension = "jpg");
 
