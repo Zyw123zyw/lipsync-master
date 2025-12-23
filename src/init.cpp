@@ -57,6 +57,20 @@ Status TalkingFace::init(const std::string model_dir, int n, int fn)
     DBG_LOGI("init n_threads : %d\n", n_threads);
     DBG_LOGI("init ffmpeg_threads : %d\n", ffmpeg_threads);
 
+    // 读取环境变量控制 filter_head_pose 缺省值
+    const char* env_filter_head_pose = std::getenv("DEFAULT_FILTER_HEAD_POSE");
+    if (env_filter_head_pose != nullptr && std::string(env_filter_head_pose) == "1")
+    {
+        default_filter_head_pose = true;
+        DBG_LOGI("DEFAULT_FILTER_HEAD_POSE enabled from environment\n");
+    }
+    else
+    {
+        default_filter_head_pose = false;
+        DBG_LOGI("DEFAULT_FILTER_HEAD_POSE disabled (default)\n");
+    }
+
+
     // 初始化FFmpeg CUDA配置
     // ffmpeg_config已在构造时自动初始化,这里可以记录配置状态
     if (ffmpeg_config.isCudaEnabled()) {
@@ -124,6 +138,21 @@ Status TalkingFace::init(const std::string model_dir, int n, int fn)
         m_generators.emplace_back(generator);
         DBG_LOGI ("Wav2Lip %d Model is initialized.\n", i);
 
+        //pose filter
+        std::string sixdrep_path_str = model_dir + "/sixdrep.engine";
+        DBG_LOGI ("SixDRep Model Loading from %s\n", sixdrep_path_str.c_str());
+        if (access(sixdrep_path_str.c_str(), F_OK) == -1)
+        {
+            DBG_LOGE("%s not exists.\n", sixdrep_path_str.c_str());
+            return Status(Status::Code::MODEL_INIT_FAIL, sixdrep_path_str + " not exists.");
+        }
+        SixDRep *face_posefilter = new SixDRep(sixdrep_path_str);
+        face_posefilter->initialize_handler();
+        face_posefilter->warmup();
+        m_face_posefilters.emplace_back(face_posefilter);
+        DBG_LOGI ("SixDRep %d Model is initialized.\n", i);
+
+
         // gcfsr
         std::string gcfsr_path_str = model_dir + "/gcfsr_blind_512.engine";
         DBG_LOGI ("GCFSR Model Loading from %s\n", gcfsr_path_str.c_str());
@@ -157,6 +186,7 @@ Status TalkingFace::stop()
         m_face_landmarkers[i] = nullptr;
         m_generators[i] = nullptr;
         m_enhancers[i] = nullptr;
+        m_face_posefilters[i] = nullptr;
     }
     DBG_LOGI("----------------------TalkingFace stop end-----------------------------.\n");
     return Status::Success;

@@ -6,5 +6,5 @@
 #include "src/hubert.h"
 #include "src/wav2lip.h"
 #include "src/gcfsr.h"
-
+#include "src/sixdrep.h"
 #endif // FUNCTION_MODELS_H

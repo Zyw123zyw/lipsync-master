@@ -90,7 +90,15 @@ void TalkingFace::detectLandmarkGPU(int work_idx,
             // 4. 侧脸检测
             if (video_params.filter_head_pose == true)
             {
-                if (this->DetectSideHeadPose(detect_box, landmark) == false)
+                cv::Mat filter_img;
+                gpu_frame(lmsdet_rect).download(filter_img);
+                EulerAngles angles;
+
+                m_face_posefilters[work_idx]->detect_pose(filter_img, angles);
+
+                if ((angles.yaw < 65 && angles.yaw > -65) && 
+                    (angles.pitch < 40 && angles.pitch > -40) &&
+                    (angles.roll < 30 && angles.roll > -30))
                 {
                     face_bbox.x = detect_box.x1;
                     face_bbox.y = detect_box.y1;

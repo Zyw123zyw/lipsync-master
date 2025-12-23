@@ -188,6 +188,10 @@ Status TalkingFace::ProcessIDParam(const char *id_params)
 void TalkingFace::readVideoParam(const char *set_params)
 {
     video_params.reset();
+    // 应用环境变量默认值（在 JSON 解析前）
+    video_params.filter_head_pose = default_filter_head_pose;
+
+
     try
     {
         Json::Reader reader;
@@ -222,13 +226,10 @@ void TalkingFace::readVideoParam(const char *set_params)
                 }
             }
 
-            // 侧脸检测
+            // 侧脸检测（如果 JSON 中显式设置则覆盖环境变量默认值）
             if (root.isMember("filter_head_pose"))
             {
-                if (root["filter_head_pose"].asInt() == 1)
-                {
-                    video_params.filter_head_pose = true;
-                }
+                video_params.filter_head_pose = (root["filter_head_pose"].asInt() == 1);
             }
 
             // 人脸检测阈值

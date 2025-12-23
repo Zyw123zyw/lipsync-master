@@ -101,7 +101,8 @@ class TalkingFace
 private:
     int n_threads;      // 渲染线程数
     int ffmpeg_threads = 0; // ffmpeg线程数
-
+    bool default_filter_head_pose = false;  // 从环境变量读取的缺省值
+    
     VideoParam video_params;   // 传参
     Infos infos;
     FFmpegConfig ffmpeg_config; // FFmpeg CUDA配置
@@ -111,7 +112,7 @@ private:
     std::vector<PIPNet*> m_face_landmarkers;
     std::vector<Wav2Lip*> m_generators;
     std::vector<GCFSR*> m_enhancers;
-
+    std::vector<SixDRep*> m_face_posefilters;
     std::vector<float> silence_hubert_feat;
 
     bool is_running;
