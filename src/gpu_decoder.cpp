@@ -240,6 +240,8 @@ void GPUDecoder::close() {
     is_opened_ = false;
     is_draining_ = false;
     current_frame_ = -1;
+    last_decoded_thread_id_ = -1;
+    last_decoded_frame_idx_ = -1;
     video_stream_idx_ = -1;
 }
 
@@ -516,10 +518,7 @@ void GPUDecoder::convertNV12ToBGR(AVFrame* frame, cv::cuda::GpuMat& output) {
 }
 
 cv::cuda::GpuMat& GPUDecoder::decodeFrame(int frame_idx, int thread_id) {
-    double t_start = (double)cv::getTickCount();
-    
     std::lock_guard<std::mutex> lock(decode_mutex_);
-    double t_lock = (double)cv::getTickCount();
     
     if (!is_opened_ || thread_id < 0 || thread_id >= (int)gpu_frame_pool_.size()) {
         DBG_LOGE("GPUDecoder: Invalid state or thread_id\n");
@@ -531,19 +530,18 @@ cv::cuda::GpuMat& GPUDecoder::decodeFrame(int frame_idx, int thread_id) {
     int actual_frame = frame_idx % frame_count_;
     
     // 解码帧
-    double t_decode_start = (double)cv::getTickCount();
     bool decoded = decodeOneFrame(actual_frame);
     
     if (!decoded) {
-        // 跳过解码或EOF时，复用已有帧（不是错误）
-        // 但要确保帧已经被初始化过
-        if (gpu_frame_pool_[thread_id].empty()) {
-            DBG_LOGW("GPUDecoder: Returning uninitialized frame for thread %d, frame_idx=%d\n", 
-                     thread_id, frame_idx);
+        // 跳过解码时，需要从最后解码的线程复制帧到当前线程
+        if (last_decoded_thread_id_ >= 0 && 
+            last_decoded_thread_id_ != thread_id &&
+            last_decoded_thread_id_ < (int)gpu_frame_pool_.size() &&
+            !gpu_frame_pool_[last_decoded_thread_id_].empty()) {
+            gpu_frame_pool_[last_decoded_thread_id_].copyTo(gpu_frame_pool_[thread_id]);
         }
         return gpu_frame_pool_[thread_id];
     }
-    double t_decode_end = (double)cv::getTickCount();
     
     // 检查 hw_frame_ 是否有效
     if (!hw_frame_ || hw_frame_->width <= 0 || hw_frame_->height <= 0) {
@@ -552,21 +550,12 @@ cv::cuda::GpuMat& GPUDecoder::decodeFrame(int frame_idx, int thread_id) {
     }
     
     // 转换并存入对应线程的GPU帧缓存
-    double t_convert_start = (double)cv::getTickCount();
     convertNV12ToBGR(hw_frame_, gpu_frame_pool_[thread_id]);
-    double t_convert_end = (double)cv::getTickCount();
+    
+    // 记录最后解码的线程ID
+    last_decoded_thread_id_ = thread_id;
     
     av_frame_unref(hw_frame_);
-    
-    double t_end = (double)cv::getTickCount();
-    double freq = cv::getTickFrequency();
-    
-    // DBG_LOGI("GPUDecoder::decodeFrame[%d] frame=%d actual=%d | wait_lock=%.1fms decode=%.1fms convert=%.1fms total=%.1fms\n",
-    //          thread_id, frame_idx, actual_frame,
-    //          (t_lock - t_start) * 1000 / freq,
-    //          (t_decode_end - t_decode_start) * 1000 / freq,
-    //          (t_convert_end - t_convert_start) * 1000 / freq,
-    //          (t_end - t_start) * 1000 / freq);
     
     return gpu_frame_pool_[thread_id];
 }

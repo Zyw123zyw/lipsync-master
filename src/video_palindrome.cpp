@@ -145,15 +145,6 @@ static std::string getBaseName(const std::string& filename) {
     return filename.substr(0, pos);
 }
 
-// 获取 FFmpeg/FFprobe 命令路径（根据环境变量 LIPSYNC_FFMPEG_DIR）
-static std::string getFFmpegCmd(const std::string& tool = "ffmpeg") {
-    const char* ffmpeg_dir = std::getenv("LIPSYNC_FFMPEG_DIR");
-    if (ffmpeg_dir != nullptr && ffmpeg_dir[0] != '\0') {
-        return std::string(ffmpeg_dir) + "/bin/" + tool;
-    }
-    return tool;  // 使用系统 PATH 中的版本
-}
-
 // 解析帧率分数格式（如 "30000/1001"）
 static double parseFpsFraction(const std::string& fraction) {
     if (fraction.empty()) {
@@ -182,7 +173,7 @@ static double parseFpsFraction(const std::string& fraction) {
 
 // 尝试获取媒体时长
 static double tryProbeDuration(const std::string& media_path, const std::string& stream_specifier) {
-    std::string cmd = getFFmpegCmd("ffprobe") + " -v error";
+    std::string cmd = "ffprobe -v error";
     if (!stream_specifier.empty()) {
         cmd += " -select_streams " + stream_specifier;
         cmd += " -show_entries stream=duration";
@@ -214,7 +205,7 @@ double probeMediaDuration(const std::string& media_path, const std::string& stre
 }
 
 double probeVideoFps(const std::string& video_path) {
-    std::string cmd = getFFmpegCmd("ffprobe") + " -v error -select_streams v:0 "
+    std::string cmd = "ffprobe -v error -select_streams v:0 "
                       "-show_entries stream=r_frame_rate "
                       "-of default=noprint_wrappers=1:nokey=1 \"" + video_path + "\"";
     std::string result = execCommand(cmd);
@@ -275,11 +266,7 @@ std::string ensurePalindromeVideo(const std::string& src_video_path,
     std::string forward_path = parent_dir + "/" + base_name + "_forward_pal.mp4";
     PAL_INFO("预先转码原视频以统一编码参数: %s\n", forward_path.c_str());
     
-    // 从环境变量 LIPSYNC_FFMPEG_DIR 获取 FFmpeg 路径
-    std::string ffmpeg_cmd = getFFmpegCmd("ffmpeg");
-    PAL_INFO("使用 FFmpeg: %s\n", ffmpeg_cmd.c_str());
-    
-    std::string forward_cmd = ffmpeg_cmd + " -y -i \"" + src_video_path + "\" "
+    std::string forward_cmd = "ffmpeg -y -i \"" + src_video_path + "\" "
                               "-c:v hevc_nvenc -preset fast -pix_fmt yuv420p -an \"" + forward_path + "\"";
     
     bool forward_success = execCommandWithLog(forward_cmd, "forward", forward_path);
@@ -316,7 +303,7 @@ std::string ensurePalindromeVideo(const std::string& src_video_path,
         snprintf(start_str, sizeof(start_str), "%.3f", start_time_seg);
         snprintf(duration_str, sizeof(duration_str), "%.3f", duration);
         
-        std::string seg_cmd = ffmpeg_cmd + " -y -ss " + std::string(start_str) + 
+        std::string seg_cmd = "ffmpeg -y -ss " + std::string(start_str) + 
                               " -t " + std::string(duration_str) +
                               " -i \"" + src_video_path + "\" "
                               "-vf reverse "
@@ -363,7 +350,7 @@ std::string ensurePalindromeVideo(const std::string& src_video_path,
     }
     
     // ========== 步骤4：执行拼接 ==========
-    std::string concat_cmd = ffmpeg_cmd + " -y -f concat -safe 0 -i \"" + concat_list_path + "\" "
+    std::string concat_cmd = "ffmpeg -y -f concat -safe 0 -i \"" + concat_list_path + "\" "
                              "-c:v hevc_nvenc -preset fast -pix_fmt yuv420p -an \"" + output_video_path + "\"";
     
     bool concat_success = execCommandWithLog(concat_cmd, "concat", output_video_path);
@@ -577,7 +564,6 @@ bool generateReversedVideo(const std::string& src_video_path,
         return false;
     }
     
-    std::string ffmpeg_cmd = getFFmpegCmd("ffmpeg");
     std::string parent_dir = getParentDir(src_video_path);
     std::string filename = getFileName(src_video_path);
     std::string base_name = getBaseName(filename);
@@ -610,7 +596,7 @@ bool generateReversedVideo(const std::string& src_video_path,
         snprintf(duration_str, sizeof(duration_str), "%.3f", duration);
         
         // GPU 编码：使用 h264_nvenc (H.264)，比 hevc_nvenc 编码更快
-        std::string seg_cmd = ffmpeg_cmd + " -y"
+        std::string seg_cmd = "ffmpeg -y"
                               " -ss " + std::string(start_str) +
                               " -t " + std::string(duration_str) +
                               " -i \"" + src_video_path + "\""
@@ -659,7 +645,7 @@ bool generateReversedVideo(const std::string& src_video_path,
     
     // ========== 执行拼接 ==========
     // 由于分段已经是 H.264 格式，拼接时可以直接 copy，速度更快
-    std::string concat_cmd = ffmpeg_cmd + " -y -f concat -safe 0"
+    std::string concat_cmd = "ffmpeg -y -f concat -safe 0"
                              " -i \"" + concat_list_path + "\""
                              " -c:v copy -an \"" + output_video_path + "\"";
     

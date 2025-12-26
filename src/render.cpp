@@ -172,6 +172,10 @@ Status TalkingFace::render(const char *src_video_path,
     gpu_resize_buffers_.resize(n_threads);
     DBG_LOGI("已初始化 %d 个GPU resize缓冲区\n", n_threads);
 
+    // 重置解码顺序计数器
+    extern void resetDecodeOrderCounter();
+    resetDecodeOrderCounter();
+
     // 开启渲染线程
     std::vector<std::thread> render_threads;
     for (int i = 0; i < n_threads; i++)

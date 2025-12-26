@@ -5,6 +5,17 @@
 std::mutex mtx;
 std::condition_variable m_cond_write;
 
+// 解码顺序控制（确保帧按顺序解码）
+static std::mutex decode_order_mtx;
+static std::condition_variable decode_order_cv;
+static int next_decode_render_idx = 0;  // 下一个应该解码的 render_idx
+
+// 重置解码顺序计数器（在开始新的渲染任务前调用）
+void resetDecodeOrderCounter() {
+    std::lock_guard<std::mutex> lock(decode_order_mtx);
+    next_decode_render_idx = 0;
+}
+
 void TalkingFace::renderProducer(int work_idx)
 {
     DBG_LOGI("render producer %d thread start.\n", work_idx);
@@ -77,10 +88,29 @@ void TalkingFace::renderProducer(int work_idx)
         float fps_ratio = current_decoder->getFPSRatio();
         int actual_decode_idx = (int)(decode_idx * fps_ratio);
 
+        // ========== 等待轮到自己解码（确保解码顺序） ==========
+        {
+            std::unique_lock<std::mutex> decode_lock(decode_order_mtx);
+            while (next_decode_render_idx != render_idx) {
+                decode_order_cv.wait(decode_lock);
+            }
+        }
+
         // 使用GPU解码器获取帧
+        //DBG_LOGI("Producer[%d] 请求解码 render_idx=%d decode_idx=%d actual_decode_idx=%d\n", 
+        //         work_idx, render_idx, decode_idx, actual_decode_idx);
         double t_gpu_start = (double)cv::getTickCount();
         cv::cuda::GpuMat& gpu_frame = current_decoder->decodeFrame(actual_decode_idx, work_idx);
         double t_gpu_decode = (double)cv::getTickCount();
+        //DBG_LOGI("Producer[%d] 解码完成 render_idx=%d actual_decode_idx=%d frame_size=%dx%d\n", 
+        //         work_idx, render_idx, actual_decode_idx, gpu_frame.cols, gpu_frame.rows);
+
+        // 解码完成，通知下一个线程
+        {
+            std::lock_guard<std::mutex> decode_lock(decode_order_mtx);
+            next_decode_render_idx++;
+            decode_order_cv.notify_all();
+        }
         
         // GPU缩放（如果需要）
         cv::cuda::GpuMat gpu_frame_resized;

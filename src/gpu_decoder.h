@@ -153,6 +153,10 @@ private:
     // 当前解码位置
     int current_frame_ = -1;
     
+    // 最后成功解码帧的线程ID和帧索引（用于跳帧时复制）
+    int last_decoded_thread_id_ = -1;
+    int last_decoded_frame_idx_ = -1;
+    
     // 状态
     bool is_opened_ = false;
     bool is_draining_ = false;  // 是否已进入drain模式（发送了flush包）
